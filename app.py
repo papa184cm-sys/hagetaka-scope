@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 # === ⚙️ ページ設定 ===
 st.set_page_config(
-    page_title="源太AI・ハゲタカscope",
+    page_title="源太AI・ハゲタカSCOPE",
     page_icon="🦅",
     layout="wide"
 )
