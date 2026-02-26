@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 # === ⚙️ ページ設定 ===
 st.set_page_config(
-    page_title="源太AI・ハゲタカSCOPE",
+    page_title="源太AI・ハゲタカscope",
     page_icon="🦅",
     layout="wide"
 )
@@ -17,7 +17,6 @@ st.sidebar.title("🦅 ハゲタカ戦略室")
 st.sidebar.markdown("---")
 st.sidebar.subheader("📅 2026年 戦略カレンダー")
 
-# 現在月を取得して戦略を表示
 current_month = datetime.now().month
 strategy_text = {
     1: "⚠️ **1月：資金温存**\n外国人買いが入りますが、3月の暴落に備えて現金比率を高めましょう。",
@@ -51,13 +50,9 @@ st.sidebar.markdown("""
 
 # === 🛠️ 関数定義 ===
 
-@st.cache_data(ttl=3600) # 1時間キャッシュ
+@st.cache_data(ttl=3600)
 def get_jpx_tickers():
-    # 本番用：1300〜9999のコードを生成（簡易版）
-    # 実際はJPXリストを使うのがベストですが、エラー回避のため範囲生成
-    # デモ動作を軽くするため、主要な銘柄コードリストを手動定義推奨
-    # 今回はデモとして「動きのある有名銘柄 + ランダム」で構成
-    # ※本番運用では全銘柄リストに差し替えます
+    # デモ用リスト（本番時は全銘柄リストを使用）
     demo_tickers = [
         "7203.T", "9984.T", "215A.T", "5032.T", "1514.T", "1605.T", 
         "8306.T", "6758.T", "7011.T", "9101.T", "6098.T", "4385.T",
@@ -72,7 +67,11 @@ def get_jpx_tickers():
     ]
     return demo_tickers
 
-def analyze_stock(ticker):
+def analyze_stock(ticker, mode="scan"):
+    """
+    mode="scan": 条件不一致ならNoneを返す（リスト用）
+    mode="search": 条件不一致でも詳細データを返す（個別診断用）
+    """
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="6mo")
@@ -84,169 +83,206 @@ def analyze_stock(ticker):
         info = stock.info
         market_cap = info.get('marketCap', 0)
         shares = info.get('sharesOutstanding', 0)
+        long_name = info.get('longName', ticker)
         
         if market_cap == 0: 
-            market_cap = current_price * shares # 補正
+            market_cap = current_price * shares 
         market_cap_oku = market_cap / 100000000
 
-        # --- 🛡️ 足切りフィルター ---
-        if current_price <= 300: return None
-        if market_cap_oku < 100 or market_cap_oku > 5000: return None
-
-        # --- 🛡️ 安全装置（2週間・20%ルール） ---
+        # --- 判定ロジック ---
+        
+        # 1. 価格フィルター
+        is_price_ok = current_price > 300
+        
+        # 2. 時価総額フィルター（プラチナ or ターゲット圏内）
+        is_platinum = 500 <= market_cap_oku <= 2000
+        is_cap_ok = 100 <= market_cap_oku <= 5000
+        
+        # 3. 安全装置（乖離率）
         recent_14_low = hist['Low'][-14:].min()
         deviation = (current_price - recent_14_low) / recent_14_low * 100
-        if deviation > 20.0: return None # 高値掴み防止
-
-        # --- 🔥 ハゲタカ検知 ---
+        is_safe = deviation <= 20.0
+        
+        # 4. ハゲタカ検知（マグマ）
         avg_vol_100 = hist['Volume'][-100:].mean()
         is_magma = current_vol > (avg_vol_100 * 1.5)
         
+        # 5. 回転率
         turnover = 0
         if shares > 0:
             turnover = (current_vol / shares) * 100
-
-        # --- 💎 プラチナ判定 ---
-        is_platinum = 500 <= market_cap_oku <= 2000
-
-        # --- 🚨 アラート（ニュース） ---
-        alert_msg = ""
-        # ニュース取得はAPI制限があるため、デモでは回転率で擬似判定
-        if turnover > 5.0: alert_msg = "🟡活況(好材料?)"
-        if deviation > 15.0: alert_msg = "🔴過熱警戒"
-
-        # --- 👑 ランク付け ---
-        rank = "D" # 通常
+        
+        # ランク付け
+        rank = "E" # 対象外
         rank_score = 0
         
-        if is_platinum: rank_score += 3
-        if is_magma: rank_score += 4
-        if 1.0 <= turnover <= 5.0: rank_score += 2 # 程よい活況
+        if is_cap_ok and is_price_ok and is_safe:
+            rank = "D" # 候補
+            if is_platinum: rank_score += 3
+            if is_magma: rank_score += 4
+            if 1.0 <= turnover <= 5.0: rank_score += 2
+            
+            # 煮詰まりボーナス
+            bb_std = hist['Close'][-20:].std()
+            bb_mean = hist['Close'][-20:].mean()
+            if bb_mean > 0 and (bb_std / bb_mean) < 0.05:
+                 rank_score += 2
+
+            if rank_score >= 7 and is_platinum: rank = "S"
+            elif rank_score >= 5: rank = "A"
+            elif is_platinum: rank = "B"
+            elif turnover >= 3.0: rank = "C"
         
-        # 煮詰まり判定（ボリンジャーバンド幅が狭い）
-        bb_std = hist['Close'][-20:].std()
-        bb_mean = hist['Close'][-20:].mean()
-        if bb_mean > 0 and (bb_std / bb_mean) < 0.05: # 変動率5%未満
-             rank_score += 2 # 煮詰まりボーナス
+        # スキャンモードなら、ランク外は弾く
+        if mode == "scan" and rank == "E":
+            return None
 
-        # 総合判定
-        if rank_score >= 7 and is_platinum: rank = "S"
-        elif rank_score >= 5: rank = "A"
-        elif is_platinum: rank = "B"
-        elif turnover >= 3.0: rank = "C"
-
+        # データ返却
         return {
             "コード": ticker.replace(".T", ""),
-            "銘柄名": info.get('longName', ticker),
+            "銘柄名": long_name,
             "現在値": int(current_price),
-            "時価総額": f"{int(market_cap_oku)}億",
+            "時価総額": market_cap_oku,
             "ランク": rank,
             "プラチナ": is_platinum,
             "ハゲタカ": is_magma,
             "回転率": turnover,
             "乖離率": deviation,
-            "アラート": alert_msg,
-            "ヒストリ": hist # チャート用
+            "ヒストリ": hist,
+            # 詳細診断用フラグ
+            "check_price": is_price_ok,
+            "check_cap": is_cap_ok,
+            "check_safe": is_safe,
+            "check_magma": is_magma
         }
     except:
         return None
+
+def draw_chart(row):
+    hist_data = row['ヒストリ']
+    price_bins = pd.cut(hist_data['Close'], bins=10)
+    vol_profile = hist_data.groupby(price_bins)['Volume'].sum()
+    max_vol_price = vol_profile.idxmax().mid
+    
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=hist_data.index,
+        open=hist_data['Open'], high=hist_data['High'],
+        low=hist_data['Low'], close=hist_data['Close'],
+        name="株価"
+    ))
+    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁")
+    fig.update_layout(title=f"{row['銘柄名']} 日足", xaxis_rangeslider_visible=False, height=300, margin=dict(l=0, r=0, t=30, b=0))
+    st.plotly_chart(fig, use_container_width=True)
 
 # === 🖥️ メイン画面 ===
 st.title("🦅 源太AI・ハゲタカscope")
 st.caption("Pro Version: 2026.02 | Target: VIP Members")
 
-# ボタンでスキャン開始
-if st.button("🔍 市場スキャン開始（ハゲタカ検知）"):
-    with st.spinner('🦅 ハゲタカAIが全市場をパトロール中...'):
-        tickers = get_jpx_tickers()
-        results = []
-        progress_bar = st.progress(0)
-        
-        for i, t in enumerate(tickers):
-            data = analyze_stock(t)
-            if data:
-                results.append(data)
-            progress_bar.progress((i + 1) / len(tickers))
-        
-        st.success(f"スキャン完了！ {len(results)} 銘柄を抽出しました。")
+# タブの作成
+tab1, tab2 = st.tabs(["🔍 個別銘柄診断", "🦅 全市場スキャン"])
 
-        # データフレーム化
-        if results:
-            df = pd.DataFrame(results)
+# --- タブ1: 個別診断 ---
+with tab1:
+    st.markdown("##### 気になる銘柄を精密検査します")
+    col_input, col_btn = st.columns([3, 1])
+    with col_input:
+        input_code = st.text_input("銘柄コードを入力 (例: 7203, 9984)", max_chars=4)
+    with col_btn:
+        st.write("") # スペース調整
+        st.write("") 
+        search_btn = st.button("診断する", type="primary")
+
+    if search_btn and input_code:
+        with st.spinner('🦅 ハゲタカAIが診断中...'):
+            ticker_code = f"{input_code}.T"
+            data = analyze_stock(ticker_code, mode="search")
             
-            # Sランクなどの並び替え
-            rank_map = {"S": 5, "A": 4, "B": 3, "C": 2, "D": 1}
-            df['score'] = df['ランク'].map(rank_map)
-            df = df.sort_values(by=['score', '回転率'], ascending=[False, False])
-
-            # --- 結果表示 ---
-            for index, row in df.iterrows():
-                # デザイン整形
-                rank_color = "red" if row['ランク'] == "S" else "orange" if row['ランク'] == "A" else "blue"
+            if data:
+                # 結果表示
+                st.markdown("---")
+                # ヘッダー
+                rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
+                if data['ランク'] == "E": rank_color = "gray"
                 
-                # アイコン
-                icons = ""
-                if row['プラチナ']: icons += "💎 "
-                if row['ハゲタカ']: icons += "🦅 "
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    st.metric("判定ランク", f"ランク {data['ランク']}")
+                    if data['プラチナ']: st.success("💎 プラチナ・チケット認定")
+                    if data['ハゲタカ']: st.error("🦅 ハゲタカ参戦？ (仕込み疑惑)")
                 
-                with st.expander(f"【{row['ランク']}】 {icons} {row['コード']} {row['銘柄名']} | {row['現在値']}円"):
-                    
-                    # 3カラムレイアウト
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("時価総額", row['時価総額'])
-                        st.metric("回転率", f"{row['回転率']:.2f}%")
-                    
-                    with col2:
-                        st.metric("底値乖離率", f"+{row['乖離率']:.1f}%")
-                        if row['アラート']:
-                            st.warning(row['アラート'])
-                        else:
-                            st.success("✅ 安全圏内")
-                            
-                    with col3:
-                        # AIコメント生成
-                        comment = ""
-                        if row['ランク'] == "S":
-                            comment = "🔥 **【激アツ】** プラチナ銘柄に「ハゲタカ参戦？」の痕跡あり！底値圏で煮詰まっており、初動の可能性大。"
-                        elif row['ランク'] == "A":
-                            comment = "📈 **【有望】** 出来高急増（ハゲタカ参戦？）を検知。資金流入が確認できます。"
-                        elif row['ランク'] == "B":
-                            comment = "👀 **【監視】** プラチナ級のサイズ感。まだ動きは静かですが、仕込み時を探るフェーズ。"
-                        else:
-                            comment = "市場の動きに合わせて監視継続。"
-                        st.markdown(comment)
+                with c2:
+                    st.subheader(f"{data['コード']} {data['銘柄名']}")
+                    st.markdown(f"**現在値:** {data['現在値']}円 | **時価総額:** {int(data['時価総額'])}億円")
 
-                    # --- チャート表示（Plotly） ---
-                    hist_data = row['ヒストリ']
-                    
-                    # 需給の壁（価格帯別出来高）計算
-                    price_bins = pd.cut(hist_data['Close'], bins=10)
-                    vol_profile = hist_data.groupby(price_bins)['Volume'].sum()
-                    max_vol_price = vol_profile.idxmax().mid # 最も出来高が多い価格帯
-                    
-                    # チャート描画
-                    fig = go.Figure()
-                    
-                    # ローソク足
-                    fig.add_trace(go.Candlestick(
-                        x=hist_data.index,
-                        open=hist_data['Open'], high=hist_data['High'],
-                        low=hist_data['Low'], close=hist_data['Close'],
-                        name="株価"
-                    ))
-                    
-                    # 需給の壁ライン
-                    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁（抵抗線）")
-                    
-                    fig.update_layout(
-                        title=f"{row['銘柄名']} 日足チャート (需給の壁チェック)",
-                        xaxis_rangeslider_visible=False,
-                        height=300,
-                        margin=dict(l=0, r=0, t=30, b=0)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                # 診断カルテ（チェックリスト）
+                st.markdown("##### 📋 AI診断カルテ")
+                
+                # 1. ボロ株チェック
+                if data['check_price']: st.success("✅ **株価水準:** 合格 (300円以上)")
+                else: st.error("❌ **株価水準:** 不合格 (300円以下のボロ株は対象外)")
+                
+                # 2. 時価総額チェック
+                if data['プラチナ']: st.success(f"✅ **サイズ感:** 💎 完璧 (プラチナレンジ {int(data['時価総額'])}億)")
+                elif data['check_cap']: st.info(f"✅ **サイズ感:** 合格 (ターゲット圏内 {int(data['時価総額'])}億)")
+                else: st.error(f"❌ **サイズ感:** 不合格 (重すぎるか軽すぎる {int(data['時価総額'])}億)")
+                
+                # 3. 安全性チェック
+                if data['check_safe']: st.success(f"✅ **安全性:** 合格 (底値乖離 {data['乖離率']:.1f}%)")
+                else: st.error(f"❌ **安全性:** 危険 (高値圏 {data['乖離率']:.1f}% - 飛びつき注意)")
+                
+                # 4. マグマチェック
+                if data['ハゲタカ']: st.success("✅ **資金流入:** 🔥 マグマ発生中 (出来高急増)")
+                else: st.info("ℹ️ **資金流入:** 静観 (目立った動きなし)")
 
-        else:
-            st.warning("該当銘柄なし。条件を緩めて再スキャンしてください。")
+                # チャート
+                draw_chart(data)
+                
+            else:
+                st.error("銘柄が見つかりません。コードを確認してください。")
+
+# --- タブ2: 全市場スキャン ---
+with tab2:
+    st.markdown("##### ハゲタカが潜む銘柄を自動抽出します")
+    if st.button("🚀 スキャン開始", key="scan_btn"):
+        with st.spinner('🦅 全市場をパトロール中...'):
+            tickers = get_jpx_tickers()
+            results = []
+            progress_bar = st.progress(0)
+            
+            for i, t in enumerate(tickers):
+                data = analyze_stock(t, mode="scan")
+                if data:
+                    results.append(data)
+                progress_bar.progress((i + 1) / len(tickers))
+            
+            st.success(f"スキャン完了！ {len(results)} 銘柄を抽出しました。")
+
+            if results:
+                df = pd.DataFrame(results)
+                rank_map = {"S": 5, "A": 4, "B": 3, "C": 2, "D": 1}
+                df['score'] = df['ランク'].map(rank_map)
+                df = df.sort_values(by=['score', '回転率'], ascending=[False, False])
+
+                for index, row in df.iterrows():
+                    icons = ""
+                    if row['プラチナ']: icons += "💎 "
+                    if row['ハゲタカ']: icons += "🦅 "
+                    
+                    with st.expander(f"【{row['ランク']}】 {icons} {row['コード']} {row['銘柄名']} | {row['現在値']}円"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("時価総額", f"{int(row['時価総額'])}億")
+                            st.metric("回転率", f"{row['回転率']:.2f}%")
+                        with col2:
+                            st.metric("底値乖離率", f"+{row['乖離率']:.1f}%")
+                        with col3:
+                            comment = ""
+                            if row['ランク'] == "S": comment = "🔥 **【激アツ】** プラチナ×ハゲタカ参戦！"
+                            elif row['ランク'] == "A": comment = "📈 **【有望】** 資金流入を検知。"
+                            elif row['ランク'] == "B": comment = "👀 **【監視】** 仕込み時を探るフェーズ。"
+                            st.markdown(comment)
+                        
+                        draw_chart(row)
+            else:
+                st.warning("該当なし。")
