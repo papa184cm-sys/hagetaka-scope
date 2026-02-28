@@ -139,7 +139,6 @@ def evaluate_stock(ticker, mode="search"):
         
         formatted_mcap = format_market_cap(market_cap_oku)
 
-        # 🎯 追加：配当と配当性向のデータ取得
         dividend_rate = info.get('dividendRate') or info.get('trailingAnnualDividendRate') or 0
         payout_ratio = info.get('payoutRatio') or 0
         div_yield = info.get('dividendYield') or info.get('trailingAnnualDividendYield') or 0
@@ -281,15 +280,22 @@ def evaluate_stock(ticker, mode="search"):
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません."
 
-        total_rank = "D"
-        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): total_rank = "S"
-        elif intervention_score >= 60: total_rank = "A"
-        elif deviation > 20: total_rank = "注意"
-        elif is_platinum and position_score <= 0.3: total_rank = "B"
-        else: total_rank = "C"
+        # 🎯 修正：ポテンシャルに基づく「ベースのランク」を決定
+        base_rank = "D"
+        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): base_rank = "S"
+        elif intervention_score >= 60: base_rank = "A"
+        elif is_platinum and position_score <= 0.3: base_rank = "B"
+        else: base_rank = "C"
 
-        if current_price <= 300: total_rank = "E"
-        if mode == "scan" and total_rank in ["E", "D", "注意"]: return None
+        if current_price <= 300: base_rank = "E"
+        
+        # 🎯 スキャン時の足切り判定（DやEランクのものは弾く）
+        if mode == "scan" and base_rank in ["D", "E"]: return None
+
+        # 🎯 追加：乖離率20%以上の場合は警告テキストを生成
+        warning_text = ""
+        if deviation > 20:
+            warning_text = "【注意】※安全性を要確認"
 
         icons_list = []
         if has_dna: icons_list.append("🧬")
@@ -303,8 +309,9 @@ def evaluate_stock(ticker, mode="search"):
             "現在値": int(current_price),
             "時価総額": market_cap_oku,
             "時価総額_表示": formatted_mcap,
-            "dividend_text": dividend_text, # 🎯 追加：配当テキストを辞書に格納
-            "ランク": total_rank,
+            "dividend_text": dividend_text,
+            "ランク": base_rank,          # 🎯 追加：ベースのランク（S, A, B, C）
+            "警告": warning_text,         # 🎯 追加：警告メッセージ
             "乖離率": deviation,
             "hist": hist,
             "max_vol_price": max_vol_price,
@@ -338,7 +345,6 @@ def draw_chart(row):
     fig.add_trace(go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], name="株価", showlegend=False), row=1, col=1)
     fig.add_trace(go.Bar(x=bin_volumes, y=bin_centers, orientation='h', marker_color='rgba(255, 165, 0, 0.6)', name="出来高ボリューム", showlegend=False, hoverinfo='y'), row=1, col=2)
     
-    # 🎯 修正：完全に分離！オレンジ線は「左上」、水色線は「右下」に固定配置
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", 
                   annotation_text=f" {int(max_vol_price)}円 🚧 需給の壁 ", 
                   annotation_position="top left", annotation_font_color="orange", row=1, col=1)
@@ -396,8 +402,18 @@ with tab1:
                             with c1:
                                 st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
                                 
-                                rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
-                                st.markdown(f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {data['ランク']}</h3>", unsafe_allow_html=True)
+                                # 🎯 修正：ベースランクの色分けと、警告文の結合表示
+                                base_rank = data['ランク']
+                                warning = data['警告']
+                                rank_color = "red" if base_rank == "S" else "orange" if base_rank == "A" else "blue"
+                                
+                                if warning:
+                                    # 警告がある場合は赤字で目立たせて結合
+                                    rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank} <span style='color:#ff4b4b; font-size:0.8em;'>{warning}</span></h3>"
+                                else:
+                                    rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank}</h3>"
+                                
+                                st.markdown(rank_html, unsafe_allow_html=True)
                                 
                                 with st.expander("💡 総合判定の基準を見る"):
                                     st.markdown("""
@@ -405,12 +421,11 @@ with tab1:
                                     * **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
                                     * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
                                     * **【Cランク】** 上記以外の標準的な状態
-                                    * **【注意】** 底値乖離が20%を超えており、高値掴みに注意
+                                    * **【注意】** 底値乖離が20%を超えている場合、安全面のアラートが表示されます
                                     """)
 
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{data['時価総額_表示']}**")
-                                # 🎯 追加：UIに配当情報を表示
                                 st.write(f"配当情報: **{data['dividend_text']}**")
                                 
                                 st.markdown("---")
@@ -486,12 +501,13 @@ with tab2:
             
             if results:
                 df = pd.DataFrame(results)
-                rank_map = {"S": 5, "A": 4, "B": 3, "注意": 2, "C": 1}
+                rank_map = {"S": 5, "A": 4, "B": 3, "C": 1}
                 df['score'] = df['ランク'].map(rank_map).fillna(0)
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
                 for index, row in df.iterrows():
-                    with st.expander(f"【{row['ランク']}】 {row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
-                        # 🎯 追加：スキャン画面のリストにも配当情報をこっそり追加
+                    # 🎯 修正：スキャン結果のタイトルにも警告文を表示
+                    warning_display = f" {row['警告']}" if row['警告'] else ""
+                    with st.expander(f"【{row['ランク']}】{warning_display} {row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
                         st.write(f"時価総額: **{row['時価総額_表示']}** | 配当: **{row['dividend_text']}** | {row['safe_judgment']}")
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
