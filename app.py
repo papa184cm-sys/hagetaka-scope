@@ -5,6 +5,8 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 import unicodedata
+import requests
+import io
 
 # === ⚙️ ページ設定 ===
 st.set_page_config(
@@ -53,13 +55,23 @@ st.sidebar.markdown("""
 
 @st.cache_data(ttl=86400)
 def get_jpx_data():
+    """JPXから銘柄リストを取得（フリーズ防止機能付き）"""
     try:
         url = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
-        df = pd.read_excel(url)
+        # サーバーからのアクセス弾き対策（User-Agent偽装）
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        
+        # 5秒待って応答がなければタイムアウト（無限クルクル防止）
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        
+        # メモリ上でExcelを展開
+        df = pd.read_excel(io.BytesIO(response.content))
         df_tickers = df[df.iloc[:, 3].isin(['プライム', 'スタンダード', 'グロース'])]
         name_map = dict(zip(df_tickers.iloc[:, 1].astype(str), df_tickers.iloc[:, 2]))
         return name_map, list(name_map.keys())
-    except:
+    except Exception as e:
+        # 取得失敗時はアプリを止めず、空のデータを返す（銘柄は英語名で表示される）
         return {}, []
 
 jpx_names, jpx_codes = get_jpx_data()
@@ -74,23 +86,10 @@ def normalize_input(input_text):
 def check_dna(hist):
     """過去の急騰（DNA）チェック：2年以内に3ヶ月で2倍になったか"""
     try:
-        # 過去2年分のデータを使用
-        # 簡易的に60日（約3ヶ月）ごとのリターンを計算
         window = 60
         if len(hist) < window: return False
-        
-        # 60日間の最高値 / 60日前の安値 が 2.0倍を超えているか
-        rolling_max = hist['High'].rolling(window=window).max()
-        rolling_min = hist['Low'].rolling(window=window).min()
-        
-        # 期間中の最大上昇率
-        # (rolling_max / rolling_min) だと同時期比較にならないので
-        # 単純に「3ヶ月リターン」の最大値を見る
-        
-        # 修正: 60日間の騰落率の最大値を探す
         pct_change = hist['Close'].pct_change(periods=60)
         max_spike = pct_change.max()
-        
         return max_spike >= 0.8 # 3ヶ月で+80%以上あれば「急騰DNAあり」とみなす
     except:
         return False
@@ -98,11 +97,9 @@ def check_dna(hist):
 def evaluate_stock(ticker):
     try:
         stock = yf.Ticker(ticker)
-        # DNAチェックのために長めに取る（2年）
         hist = stock.history(period="2y")
         if len(hist) < 30: return None
 
-        # 直近データ
         current_price = hist['Close'].iloc[-1]
         current_vol = hist['Volume'].iloc[-1]
         avg_vol_100 = hist['Volume'][-100:].mean()
@@ -116,15 +113,11 @@ def evaluate_stock(ticker):
         code_only = ticker.replace(".T", "")
         jp_name = jpx_names.get(code_only, info.get('longName', ticker))
 
-        # --- 🔍 1. 物理ポテンシャル (源太式・位置エネルギー) ---
-        # 以前の「株価水準(PER/PBR)」を廃止し、位置と資産バリアで判定
-        
-        # 年初来（過去1年）の高値・安値位置
+        # --- 🔍 1. 物理ポテンシャル ---
         past_1y = hist[-250:]
         year_high = past_1y['High'].max()
         year_low = past_1y['Low'].min()
         
-        # 現在位置（0% = 最安値, 100% = 最高値）
         position_score = 0.5
         if year_high != year_low:
             position_score = (current_price - year_low) / (year_high - year_low)
@@ -138,7 +131,7 @@ def evaluate_stock(ticker):
         if current_price <= 300:
             pot_rank = "E"
             pot_comment = "ボロ株圏内（対象外）"
-        elif position_score <= 0.2: # 底値圏 (下位20%)
+        elif position_score <= 0.2:
             if pbr < 1.0:
                 pot_rank = "S"
                 pot_comment = "鉄の岩盤 (資産バリア＋底値)"
@@ -154,7 +147,7 @@ def evaluate_stock(ticker):
         elif position_score <= 0.8:
             pot_rank = "C"
             pot_comment = "トレンド発生中"
-        else: # 高値圏 (上位20%)
+        else:
             pot_rank = "D"
             pot_comment = "高値圏 (真空地帯・警戒)"
 
@@ -186,8 +179,7 @@ def evaluate_stock(ticker):
             size_rank = "特大"
             size_comment = "国策級"
 
-        # --- 🔍 3. 安全性 (底値乖離) ---
-        # 直近の短期的な過熱感
+        # --- 🔍 3. 安全性 ---
         recent_14_low = hist['Low'][-14:].min()
         deviation = (current_price - recent_14_low) / recent_14_low * 100
         
@@ -239,7 +231,7 @@ def evaluate_stock(ticker):
         score = 0
         if is_platinum: score += 3
         if is_magma: score += 3
-        if pot_rank in ["S", "A"]: score += 2 # ポテンシャル重視
+        if pot_rank in ["S", "A"]: score += 2
         if has_dna: score += 1
         
         if score >= 8: total_rank = "S"
@@ -261,7 +253,6 @@ def evaluate_stock(ticker):
             "DNA": has_dna,
             "乖離率": deviation,
             "ヒストリ": hist,
-            # 詳細
             "pot_rank": pot_rank,
             "pot_comment": pot_comment,
             "size_rank": size_rank,
@@ -275,7 +266,7 @@ def evaluate_stock(ticker):
         return None
 
 def draw_chart(row):
-    hist_data = row['ヒストリ'].tail(150) # チャートは見やすく直近半年分
+    hist_data = row['ヒストリ'].tail(150)
     price_bins = pd.cut(hist_data['Close'], bins=10)
     vol_profile = hist_data.groupby(price_bins)['Volume'].sum()
     max_vol_price = vol_profile.idxmax().mid
@@ -328,10 +319,8 @@ with tab1:
                             with c2:
                                 st.markdown("##### 📋 AI診断カルテ")
                                 
-                                # 1. 物理ポテンシャル (旧:株価水準)
                                 st.info(f"🔋 **物理ポテンシャル:** {data['pot_rank']}ランク ({data['pot_comment']})")
                                 
-                                # 2. サイズ感
                                 if data['プラチナ']:
                                     st.success(f"📏 **サイズ感:** {data['size_rank']} ({data['size_comment']})")
                                 elif "特大" in data['size_rank'] or "小さい" in data['size_rank']:
@@ -339,13 +328,11 @@ with tab1:
                                 else:
                                     st.info(f"📏 **サイズ感:** {data['size_rank']} ({data['size_comment']})")
                                 
-                                # 3. 安全性
                                 msg_safe = f"🛡️ **安全性:** {data['safe_rank']} (底値乖離 {data['乖離率']:.1f}%)"
                                 if data['safe_class'] == "success": st.success(msg_safe)
                                 elif data['safe_class'] == "warning": st.warning(msg_safe)
                                 else: st.error(msg_safe)
                                 
-                                # 4. 資金流入
                                 msg_inflow = f"🔥 **資金流入:** {data['inflow_rank']}"
                                 if data['inflow_class'] == "success": st.success(msg_inflow)
                                 elif data['inflow_class'] == "warning": st.warning(msg_inflow)
