@@ -63,10 +63,8 @@ def get_jpx_data():
         response = requests.get(html_url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        # HTML内から "data_j.xls" のリンクを正規表現で見つけ出す
         match = re.search(r'href="([^"]+data_j\.xls)"', response.text)
-        if not match:
-            return {}, []
+        if not match: return {}, []
             
         file_url = "https://www.jpx.co.jp" + match.group(1)
         xls_response = requests.get(file_url, headers=headers, timeout=10)
@@ -74,7 +72,10 @@ def get_jpx_data():
         
         df = pd.read_excel(io.BytesIO(xls_response.content))
         df_tickers = df[df.iloc[:, 3].isin(['プライム', 'スタンダード', 'グロース'])]
-        name_map = dict(zip(df_tickers.iloc[:, 1].astype(str), df_tickers.iloc[:, 2]))
+        
+        # 証券コードが小数点で認識されるのを防ぐ（例: 7011.0 -> 7011）
+        codes = df_tickers.iloc[:, 1].apply(lambda x: str(int(float(x))) if pd.notnull(x) else "")
+        name_map = dict(zip(codes, df_tickers.iloc[:, 2]))
         return name_map, list(name_map.keys())
     except Exception:
         return {}, []
@@ -99,7 +100,6 @@ def check_dna(hist):
         return False
 
 def format_market_cap(oku_val):
-    """〇兆〇億円フォーマットに変換する関数"""
     oku_val = int(oku_val)
     if oku_val >= 10000:
         cho = oku_val // 10000
@@ -142,15 +142,27 @@ def evaluate_stock(ticker, mode="scan"):
         if market_cap == 0: market_cap = current_price * shares
         market_cap_oku = market_cap / 100000000
         
-        # ★追加: 時価総額のフォーマット済みテキスト
         formatted_mcap = format_market_cap(market_cap_oku)
 
         code_only = ticker.replace(".T", "")
-        jp_name = jpx_names.get(code_only, info.get('longName', ticker))
+        jp_name = jpx_names.get(code_only)
+
+        # 和名が取れなかった場合、日本のYahooファイナンスから直接取得するバックアップ処理
+        if not jp_name or re.search(r'[a-zA-Z]', jp_name):
+            try:
+                url_yfjp = f"https://finance.yahoo.co.jp/quote/{code_only}.T"
+                res_yfjp = requests.get(url_yfjp, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+                match = re.search(r'<title>(.+?)(?:\(株\))?【', res_yfjp.text)
+                if match:
+                    jp_name = match.group(1).strip()
+                else:
+                    jp_name = info.get('longName', ticker)
+            except:
+                jp_name = info.get('longName', ticker)
 
         if current_price <= 300 and mode == "scan": return None
 
-        # --- 時価総額によるカテゴリ分け（AI解説出し分け用） ---
+        # --- 時価総額によるカテゴリ分け ---
         if market_cap_oku >= 5000:
             cap_category = "large"
             intervention_name = "🏢 機関投資家・大口流入度"
@@ -201,7 +213,6 @@ def evaluate_stock(ticker, mode="scan"):
             star_desc = f"頭打ち警戒（すぐ上に分厚い壁あり）"
             base_logic = f"現在値のすぐ上（{int(max_vol_price)}円付近）に強烈な「しこり玉（含み損勢）」が大量に待機しています。"
 
-        # 時価総額に応じた解説のフレーバー追加
         flavor_logic = ""
         if cap_category == "large":
             flavor_logic = "時価総額が巨大なため『仕手筋の急騰仕掛け』は入りませんが、機関投資家や外国人投資家の資金流入をエンジンとした、強力で重厚なトレンドが期待できます。"
@@ -224,7 +235,7 @@ def evaluate_stock(ticker, mode="scan"):
         vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
         is_platinum = 500 <= market_cap_oku <= 2000
 
-        # --- ③ 介入度（%）の計算と10%刻み化 ---
+        # --- ③ 介入度（%） ---
         intervention_score = 0
         
         if is_platinum: intervention_score += 35
@@ -287,7 +298,6 @@ def draw_chart(row):
     hist_data = row['ヒストリ'].tail(150)
     max_vol_price = row['max_vol_price']
     
-    # 価格帯別出来高の計算
     bins = 15
     hist_data_copy = hist_data.copy()
     hist_data_copy['price_bins'] = pd.cut(hist_data_copy['Close'], bins=bins)
@@ -295,10 +305,8 @@ def draw_chart(row):
     bin_centers = [b.mid for b in vol_profile.index]
     bin_volumes = vol_profile.values
     
-    # 2画面分割（左：ローソク足、右：価格帯別出来高）
     fig = make_subplots(rows=1, cols=2, shared_yaxes=True, column_widths=[0.85, 0.15], horizontal_spacing=0)
     
-    # 左：ローソク足チャート
     fig.add_trace(go.Candlestick(
         x=hist_data.index,
         open=hist_data['Open'], high=hist_data['High'],
@@ -307,7 +315,6 @@ def draw_chart(row):
         showlegend=False
     ), row=1, col=1)
     
-    # 右：価格帯別出来高（横棒グラフ）
     fig.add_trace(go.Bar(
         x=bin_volumes,
         y=bin_centers,
@@ -318,7 +325,6 @@ def draw_chart(row):
         hoverinfo='y'
     ), row=1, col=2)
     
-    # 需給の壁（両方のチャートを貫通する線）
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁", row=1, col=1)
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", row=1, col=2)
 
@@ -328,9 +334,7 @@ def draw_chart(row):
         height=350,
         margin=dict(l=0, r=0, t=30, b=0)
     )
-    # 右側のX軸ラベルを消してスッキリさせる
     fig.update_xaxes(showticklabels=False, row=1, col=2)
-    
     st.plotly_chart(fig, use_container_width=True)
 
 # === 🖥️ メイン画面 ===
@@ -386,14 +390,14 @@ with tab1:
                                 rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
                                 st.markdown(f"<h2 style='color:{rank_color};'>総合判定: {data['ランク']}</h2>", unsafe_allow_html=True)
                                 
-                                # 💡 総合判定の基準プルダウンを追加
+                                # 💡 総合判定の基準プルダウン（箇条書きに修正）
                                 with st.expander("💡 総合判定の基準"):
-                                    st.caption("""
-                                    **【Sランク】** 大口介入度80%以上 ＋ お得度(上昇余地)30%以上
-                                    **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
-                                    **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
-                                    **【Cランク】** 上記以外の標準的な状態
-                                    **【注意】** 底値から20%以上上昇しており、高値掴み・利確売りに警戒
+                                    st.markdown("""
+                                    * **【Sランク】** 大口介入度80%以上 ＋ お得度(上昇余地)30%以上
+                                    * **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
+                                    * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
+                                    * **【Cランク】** 上記以外の標準的な状態
+                                    * **【注意】** 底値から20%以上上昇しており、高値掴み・利確売りに警戒
                                     """)
 
                                 st.write(f"**{data['コード']} {data['銘柄名']}**")
@@ -408,21 +412,17 @@ with tab1:
                             with c2:
                                 st.markdown("##### 📋 AI診断カルテ")
                                 
-                                # 1. お得度（需給ターゲット）
                                 st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
-                                # プルダウン式の解説
                                 with st.expander("💡 算出ロジックとAIの解説を見る"):
                                     st.info(data['star_logic'])
                                 
                                 st.markdown("---")
                                 
-                                # 2. 安全性
                                 msg_safe = f"🛡️ **安全性 (高値掴みリスク):** 底値乖離 {data['乖離率']:.1f}%"
                                 st.write(msg_safe)
                                 with st.expander("💡 安全性の見方"):
                                     st.caption("直近の底値から20%以内であれば勝負しやすい範囲です。高すぎる場合は利確の売り浴びせに注意してください。")
 
-                            # チャート描画（価格帯別出来高付き）
                             draw_chart(data)
                     else:
                         st.error(f"❌ {code}: データ取得エラー")
