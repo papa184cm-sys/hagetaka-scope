@@ -139,6 +139,18 @@ def evaluate_stock(ticker, mode="search"):
         
         formatted_mcap = format_market_cap(market_cap_oku)
 
+        # 🎯 追加：配当と配当性向のデータ取得
+        dividend_rate = info.get('dividendRate') or info.get('trailingAnnualDividendRate') or 0
+        payout_ratio = info.get('payoutRatio') or 0
+        div_yield = info.get('dividendYield') or info.get('trailingAnnualDividendYield') or 0
+
+        if dividend_rate > 0:
+            payout_str = f"{payout_ratio * 100:.1f}%" if payout_ratio > 0 else "-"
+            yield_str = f"{div_yield * 100:.2f}%" if div_yield > 0 else "-"
+            dividend_text = f"{dividend_rate}円 （利回り: {yield_str} / 配当性向: {payout_str}）"
+        else:
+            dividend_text = "無配"
+
         code_only = ticker.replace(".T", "")
         jp_name = jpx_names.get(code_only)
         if not jp_name or re.search(r'[a-zA-Z]', jp_name):
@@ -291,6 +303,7 @@ def evaluate_stock(ticker, mode="search"):
             "現在値": int(current_price),
             "時価総額": market_cap_oku,
             "時価総額_表示": formatted_mcap,
+            "dividend_text": dividend_text, # 🎯 追加：配当テキストを辞書に格納
             "ランク": total_rank,
             "乖離率": deviation,
             "hist": hist,
@@ -325,18 +338,15 @@ def draw_chart(row):
     fig.add_trace(go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], name="株価", showlegend=False), row=1, col=1)
     fig.add_trace(go.Bar(x=bin_volumes, y=bin_centers, orientation='h', marker_color='rgba(255, 165, 0, 0.6)', name="出来高ボリューム", showlegend=False, hoverinfo='y'), row=1, col=2)
     
-    # 修正: 需給の壁と直近底値のラベル被り防止ロジック
-    price_diff_ratio = abs(max_vol_price - recent_20_low) / max_vol_price
-    bottom_text_pos = "bottom left" if price_diff_ratio >= 0.03 else "bottom right"
-
+    # 🎯 修正：完全に分離！オレンジ線は「左上」、水色線は「右下」に固定配置
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", 
                   annotation_text=f" {int(max_vol_price)}円 🚧 需給の壁 ", 
                   annotation_position="top left", annotation_font_color="orange", row=1, col=1)
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", row=1, col=2)
     
     fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", 
-                  annotation_text=f" {int(recent_20_low)}円 🔵 直近底値(1ヶ月) ", 
-                  annotation_position=bottom_text_pos, annotation_font_color="cyan", row=1, col=1)
+                  annotation_text=f" 直近底値(1ヶ月) 🔵 {int(recent_20_low)}円 ", 
+                  annotation_position="bottom right", annotation_font_color="cyan", row=1, col=1)
     fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", row=1, col=2)
 
     fig.update_layout(title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高", xaxis_rangeslider_visible=False, height=350, margin=dict(l=0, r=0, t=30, b=0))
@@ -384,7 +394,6 @@ with tab1:
                             st.markdown("---")
                             c1, c2 = st.columns([1, 2])
                             with c1:
-                                # 修正: 銘柄名を一番上にし、総合判定をその下に移動
                                 st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
                                 
                                 rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
@@ -401,6 +410,8 @@ with tab1:
 
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{data['時価総額_表示']}**")
+                                # 🎯 追加：UIに配当情報を表示
+                                st.write(f"配当情報: **{data['dividend_text']}**")
                                 
                                 st.markdown("---")
                                 st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
@@ -480,6 +491,7 @@ with tab2:
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
                 for index, row in df.iterrows():
                     with st.expander(f"【{row['ランク']}】 {row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
-                        st.write(f"時価総額: **{row['時価総額_表示']}** | {row['safe_judgment']}")
+                        # 🎯 追加：スキャン画面のリストにも配当情報をこっそり追加
+                        st.write(f"時価総額: **{row['時価総額_表示']}** | 配当: **{row['dividend_text']}** | {row['safe_judgment']}")
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
