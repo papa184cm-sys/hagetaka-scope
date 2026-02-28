@@ -140,7 +140,6 @@ def evaluate_stock(ticker, mode="search"):
         
         formatted_mcap = format_market_cap(market_cap_oku)
 
-        # 🎯 追加：商い熱量（株式回転率）の計算と文字列生成
         if shares > 0 and current_vol > 0:
             turnover_rate = (current_vol / shares) * 100
         else:
@@ -386,7 +385,7 @@ def evaluate_stock(ticker, mode="search"):
             "時価総額": market_cap_oku,
             "時価総額_表示": formatted_mcap,
             "dividend_text": dividend_text,
-            "turnover_str": turnover_str, # 🎯 追加：商い熱量のテキスト
+            "turnover_str": turnover_str,
             "ランク": base_rank,
             "警告": warning_text,
             "乖離率": deviation,
@@ -502,10 +501,9 @@ with tab1:
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{data['時価総額_表示']}**")
                                 st.write(f"配当情報: **{data['dividend_text']}**")
-                                # 🎯 追加：商い熱量の表示
                                 st.write(f"商い熱量: **{data['turnover_str']}**")
                                 
-                                # 🎯 追加：商い熱量についての解説アコーディオン
+                                # 🎯 修正：AIの判定基準目安を追記
                                 with st.expander("💡 商い熱量（株式回転率）とは？"):
                                     st.markdown("""
                                     **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
@@ -517,6 +515,13 @@ with tab1:
                                       発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
                                     * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
                                       上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
+                                      
+                                    ---
+                                    **【AIの判定基準目安】**
+                                    * **1%未満 【💤 平常運転】**：通常の商いです。まずは静観が基本となります。
+                                    * **2%以上 【🔥 動意づき】**：やや熱を帯びてきました。水面下で資金が動き始めている可能性があります。
+                                    * **5%以上 【🔥🔥 異常値・大口介入濃厚】**：明確な大口資金の介入や、大相場へ発展する可能性を秘めた激アツ水準です。
+                                    * **10%以上 【🔥🔥🔥 超異常値・大相場警戒】**：極めて稀な熱量です。「セリングクライマックス（大暴落の底）」か「バイイングクライマックス（大天井）」の可能性があり、相場の転換点となるケースが多いため警戒と注視が必要です。
                                     """)
                                 
                                 st.markdown("---")
@@ -604,7 +609,6 @@ with tab2:
                 for index, row in df.iterrows():
                     warning_display = f" <span style='color:#ff4b4b; font-size:0.9em;'>{row['警告']}</span>" if row['警告'] else ""
                     with st.expander(f"【{row['ランク']}】{row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%", expanded=False):
-                        # 🎯 追加：スキャン結果の表示にも熱量を追加
                         st.markdown(f"**時価総額:** {row['時価総額_表示']} | **配当:** {row['dividend_text']} | **熱量:** {row['turnover_str']} | {row['safe_judgment']}{warning_display}", unsafe_allow_html=True)
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
