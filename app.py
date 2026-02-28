@@ -223,7 +223,6 @@ def evaluate_stock(ticker, mode="search"):
         vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
         is_platinum = 500 <= market_cap_oku <= 2000
 
-        # --- ③ 安全性（底値乖離）表現の軟化と解説の追加 ---
         recent_14_low = hist['Low'][-14:].min()
         deviation = (current_price - recent_14_low) / recent_14_low * 100
 
@@ -389,21 +388,26 @@ with tab1:
                                 with st.expander("💡 算出ロジックとAIの解説を見る"): st.info(data['star_logic'])
                                 st.markdown("---")
                                 
-                                # 安全性の表示（詳しい解説文付き）
                                 msg_safe_main = f"🛡️ **安全性 (高値掴みリスク):** {data['safe_judgment']}"
                                 st.write(msg_safe_main)
                                 st.caption(f"💡 AI解説: {data['safe_explain']}")
                                 st.markdown(f"**（底値からの乖離率: {data['乖離率']:.1f}%）**")
                                 
+                                # ここの表記漏れを修正して7段階すべて網羅しました
                                 with st.expander("💡 安全性（底値乖離）の見方を見る"):
                                     safe_explain_html = f"""
-                                    <p style='color: white; font-size: 0.95rem; line-height: 1.6;'>
-                                    当ツールでは、源太流の「煮詰まり」を判定するため、<strong>過去14営業日（約3週間）の最安値</strong>を「直近の底値」と定義しています.<br>
-                                    この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します.<br><br>
-                                    <strong>【AIの判定基準】</strong><br>
-                                    ・<strong>20%以内:</strong> 煮詰まり圏内. ハゲタカが仕掛けを狙う、勝負しやすい範囲です.<br>
-                                    ・<strong>20%超:</strong> トレンド発生中ですが、いつ利確（売り浴びせ）が来てもおかしくない「過熱圏」です. 新規参戦はリスクが高まるため「注意」や「警戒」判定となります.
-                                    </p>
+                                    <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
+                                    当ツールでは、源太流の「煮詰まり」を判定するため、<strong>過去14営業日（約3週間）の最安値</strong>を「直近の底値」と定義しています。<br>
+                                    この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します。<br><br>
+                                    <strong>【AIの判定基準一覧】</strong><br>
+                                    ・<strong>3.0%以内 【★ 絶好】</strong> 底値煮詰まり完了の可能性<br>
+                                    ・<strong>5.0%以内 【★ 有望】</strong> 勝負しやすいエントリー位置<br>
+                                    ・<strong>10.0%以内 【✓ 及第点】</strong> トレンド発生の兆候あり<br>
+                                    ・<strong>15.0%以内 【✓ 短期なら】</strong> スピード勝負の領域<br>
+                                    ・<strong>20.0%以内 【⚠️ 限界範囲】</strong> 高値掴みに注意<br>
+                                    ・<strong>30.0%以内 【❌ 警戒】</strong> 短期的な過熱感あり<br>
+                                    ・<strong>30.1%以上 【💀 高度な警戒】</strong> 上級者向けの過熱圏
+                                    </div>
                                     """
                                     st.markdown(safe_explain_html, unsafe_allow_html=True)
 
