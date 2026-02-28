@@ -55,23 +55,17 @@ st.sidebar.markdown("""
 
 @st.cache_data(ttl=86400)
 def get_jpx_data():
-    """JPXから銘柄リストを取得（フリーズ防止機能付き）"""
     try:
         url = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
-        # サーバーからのアクセス弾き対策（User-Agent偽装）
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        
-        # 5秒待って応答がなければタイムアウト（無限クルクル防止）
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         response.raise_for_status()
         
-        # メモリ上でExcelを展開
         df = pd.read_excel(io.BytesIO(response.content))
         df_tickers = df[df.iloc[:, 3].isin(['プライム', 'スタンダード', 'グロース'])]
         name_map = dict(zip(df_tickers.iloc[:, 1].astype(str), df_tickers.iloc[:, 2]))
         return name_map, list(name_map.keys())
-    except Exception as e:
-        # 取得失敗時はアプリを止めず、空のデータを返す（銘柄は英語名で表示される）
+    except Exception:
         return {}, []
 
 jpx_names, jpx_codes = get_jpx_data()
@@ -84,19 +78,35 @@ def normalize_input(input_text):
     return list(set(codes))
 
 def check_dna(hist):
-    """過去の急騰（DNA）チェック：2年以内に3ヶ月で2倍になったか"""
     try:
         window = 60
         if len(hist) < window: return False
         pct_change = hist['Close'].pct_change(periods=60)
         max_spike = pct_change.max()
-        return max_spike >= 0.8 # 3ヶ月で+80%以上あれば「急騰DNAあり」とみなす
+        return max_spike >= 0.8
     except:
         return False
 
-def evaluate_stock(ticker):
+def evaluate_stock(ticker, mode="scan"):
     try:
         stock = yf.Ticker(ticker)
+
+        # --- 第一段階: 高速足切り ---
+        if mode == "scan":
+            try:
+                fast = stock.fast_info
+                last_price = getattr(fast, 'last_price', None)
+                if last_price and last_price <= 300:
+                    return None
+                mcap = getattr(fast, 'market_cap', None)
+                if mcap:
+                    mcap_oku = mcap / 100000000
+                    if mcap_oku < 50 or mcap_oku > 10000:
+                        return None
+            except:
+                pass
+
+        # --- 第二段階: 精密検査 ---
         hist = stock.history(period="2y")
         if len(hist) < 30: return None
 
@@ -113,134 +123,115 @@ def evaluate_stock(ticker):
         code_only = ticker.replace(".T", "")
         jp_name = jpx_names.get(code_only, info.get('longName', ticker))
 
-        # --- 🔍 1. 物理ポテンシャル ---
+        if current_price <= 300:
+            if mode == "scan": return None
+
+        # --- ① お得度（上昇余地）の星評価ロジック ---
         past_1y = hist[-250:]
         year_high = past_1y['High'].max()
         year_low = past_1y['Low'].min()
         
+        # BPS（1株当たり純資産）を取得。取得できない場合は直近1年高値を仮の理論株価とする
+        bps = info.get('bookValue', 0)
+        target_price = max(year_high, bps) if bps > 0 else year_high
+        
+        upside_potential = 0
+        if current_price > 0 and target_price > current_price:
+            upside_potential = ((target_price - current_price) / current_price) * 100
+
+        star_rating = ""
+        star_desc = ""
+        star_logic = f"理論株価({int(target_price)}円)と現在値を比較した「お得度」です。"
+        
+        if upside_potential >= 50:
+            star_rating = "★★★★★"
+            star_desc = "お宝（上昇余地 +50% 以上）"
+            star_logic += " 解散価値(PBR1倍)や過去高値から見て、強烈な割安水準に放置されています。"
+        elif upside_potential >= 30:
+            star_rating = "★★★★☆"
+            star_desc = "激アツ（上昇余地 +30% 〜 +50%）"
+            star_logic += " 大口が買い上げを狙うには十分すぎる「のり代」があります。"
+        elif upside_potential >= 15:
+            star_rating = "★★★☆☆"
+            star_desc = "有望（上昇余地 +15% 〜 +30%）"
+            star_logic += " 堅実な上昇が見込める、買い妙味のある水準です。"
+        elif upside_potential >= 5:
+            star_rating = "★★☆☆☆"
+            star_desc = "普通（上昇余地 +5% 〜 +15%）"
+            star_logic += " 適正価格に近く、大きな上値は期待しづらい状態です。"
+        elif upside_potential > 0:
+            star_rating = "★☆☆☆☆"
+            star_desc = "トントン（上昇余地 0% 〜 +5%）"
+            star_logic += " ほぼ理論株価に到達しており、旨味は少ないです。"
+        else:
+            star_rating = "☆☆☆☆☆"
+            star_desc = "割高（上昇余地 0% 未満）"
+            star_logic += " ※ただし、すでに活況入りしている可能性もあるため、トレンドを追う短期勝負の順張りならトライする価値はあります。"
+
+        # --- ② 各種指標の取得 ---
         position_score = 0.5
         if year_high != year_low:
             position_score = (current_price - year_low) / (year_high - year_low)
             
-        pbr = info.get('priceToBook', 0)
         has_dna = check_dna(hist)
-        
-        pot_rank = "C"
-        pot_comment = "ニュートラル"
-        
-        if current_price <= 300:
-            pot_rank = "E"
-            pot_comment = "ボロ株圏内（対象外）"
-        elif position_score <= 0.2:
-            if pbr < 1.0:
-                pot_rank = "S"
-                pot_comment = "鉄の岩盤 (資産バリア＋底値)"
-            elif has_dna:
-                pot_rank = "A"
-                pot_comment = "点火待ち (DNAあり＋底値)"
-            else:
-                pot_rank = "B"
-                pot_comment = "エネルギー充填中"
-        elif position_score <= 0.5:
-            pot_rank = "B"
-            pot_comment = "押し目・中段保ち合い"
-        elif position_score <= 0.8:
-            pot_rank = "C"
-            pot_comment = "トレンド発生中"
-        else:
-            pot_rank = "D"
-            pot_comment = "高値圏 (真空地帯・警戒)"
+        vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
+        is_platinum = 500 <= market_cap_oku <= 2000
+        is_magma = vol_ratio > 1.5
 
-        # --- 🔍 2. サイズ感 ---
-        size_rank = "良好"
-        size_comment = "合格"
-        is_platinum = False
-        
-        if market_cap_oku < 50:
-            size_rank = "小さすぎる"
-            size_comment = "板薄・危険"
-        elif market_cap_oku < 100:
-            size_rank = "やや小さい"
-            size_comment = "流動性注意"
-        elif market_cap_oku <= 500:
-            size_rank = "良好"
-            size_comment = "合格圏内"
-        elif market_cap_oku <= 2000:
-            size_rank = "💎 プラチナ"
-            size_comment = "ハゲタカの好物"
-            is_platinum = True
-        elif market_cap_oku <= 5000:
-            size_rank = "やや大きい"
-            size_comment = "動きが重い"
-        elif market_cap_oku <= 10000:
-            size_rank = "大きい"
-            size_comment = "機関の主戦場"
-        else:
-            size_rank = "特大"
-            size_comment = "国策級"
+        # --- ③ ハゲタカ介入度（%）メーターのロジック ---
+        intervention_score = 0
+        intervention_reasons = []
 
-        # --- 🔍 3. 安全性 ---
+        # サイズ感（大口の狙いやすさ）
+        if is_platinum:
+            intervention_score += 35
+            intervention_reasons.append("✓ プラチナレンジ：大口が最も仕掛けやすい黄金サイズ(500〜2000億)")
+        elif 100 <= market_cap_oku <= 5000:
+            intervention_score += 15
+            intervention_reasons.append("✓ ターゲット圏内：機関投資家が売買可能な企業規模")
+
+        # 資金流入（出来高異常）
+        if vol_ratio >= 3.0:
+            intervention_score += 40
+            intervention_reasons.append(f"✓ 資金流入：出来高が平常時の{vol_ratio:.1f}倍！ステルス集積の疑い極めて濃厚")
+        elif vol_ratio >= 1.5:
+            intervention_score += 25
+            intervention_reasons.append(f"✓ 資金流入：出来高急増({vol_ratio:.1f}倍)。ハゲタカ参戦の兆候あり")
+
+        # 底値圏の煮詰まり・DNA
+        if position_score <= 0.2:
+            intervention_score += 15
+            intervention_reasons.append("✓ 位置エネルギー：底値圏で煮詰まっており、反発のエネルギーが充填済み")
+        if has_dna:
+            intervention_score += 10
+            intervention_reasons.append("✓ 急騰DNA：過去に短期間で倍増した実績（仕手化の習性）あり")
+
+        # 上限100%に丸める
+        intervention_score = min(intervention_score, 100)
+        
+        # 介入度の判定コメント
+        intervention_comment = ""
+        if intervention_score >= 80:
+            intervention_comment = "🚨 【極めて濃厚】大口の介入シグナルが多数点灯しています！"
+        elif intervention_score >= 50:
+            intervention_comment = "👀 【予兆あり】水面下で集められている可能性があります。"
+        else:
+            intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません。"
+
+        # --- 安全性（乖離率） ---
         recent_14_low = hist['Low'][-14:].min()
         deviation = (current_price - recent_14_low) / recent_14_low * 100
-        
-        safe_rank = "見送り"
-        safe_class = "danger"
-        
-        if deviation <= 5.0:
-            safe_rank = "絶好"
-            safe_class = "success"
-        elif deviation <= 10.0:
-            safe_rank = "良好"
-            safe_class = "success"
-        elif deviation <= 20.0:
-            safe_rank = "及第点"
-            safe_class = "warning"
-        elif deviation <= 30.0:
-            safe_rank = "見送り（上値意識）"
-            safe_class = "error"
-        else:
-            safe_rank = "手出し無用（過熱）"
-            safe_class = "error"
-
-        # --- 🔍 4. 資金流入 ---
-        vol_ratio = 0
-        if avg_vol_100 > 0:
-            vol_ratio = current_vol / avg_vol_100
-        
-        inflow_rank = "皆無に近い"
-        inflow_class = "info"
-        is_magma = False
-        
-        if vol_ratio > 3.0:
-            inflow_rank = "🦅 ハゲタカ察知！"
-            inflow_class = "success"
-            is_magma = True
-        elif vol_ratio > 2.0:
-            inflow_rank = "ハゲタカ気配あり"
-            inflow_class = "success"
-            is_magma = True
-        elif vol_ratio > 1.5:
-            inflow_rank = "流入予兆"
-            inflow_class = "warning"
-        elif vol_ratio > 1.2:
-            inflow_rank = "やや流入観測"
-            inflow_class = "info"
 
         # --- 総合ランク ---
         total_rank = "D"
-        score = 0
-        if is_platinum: score += 3
-        if is_magma: score += 3
-        if pot_rank in ["S", "A"]: score += 2
-        if has_dna: score += 1
-        
-        if score >= 8: total_rank = "S"
-        elif score >= 6: total_rank = "A"
-        elif score >= 4: total_rank = "B"
+        if intervention_score >= 80 and upside_potential >= 30: total_rank = "S"
+        elif intervention_score >= 60: total_rank = "A"
+        elif is_platinum and position_score <= 0.3: total_rank = "B"
         elif deviation > 20: total_rank = "注意"
         else: total_rank = "C"
 
         if current_price <= 300: total_rank = "E"
+        if mode == "scan" and total_rank in ["E", "D", "注意"]: return None
 
         return {
             "コード": code_only,
@@ -248,19 +239,19 @@ def evaluate_stock(ticker):
             "現在値": int(current_price),
             "時価総額": market_cap_oku,
             "ランク": total_rank,
-            "プラチナ": is_platinum,
-            "ハゲタカ": is_magma,
-            "DNA": has_dna,
             "乖離率": deviation,
             "ヒストリ": hist,
-            "pot_rank": pot_rank,
-            "pot_comment": pot_comment,
-            "size_rank": size_rank,
-            "size_comment": size_comment,
-            "safe_rank": safe_rank,
-            "safe_class": safe_class,
-            "inflow_rank": inflow_rank,
-            "inflow_class": inflow_class
+            # お得度データ
+            "star_rating": star_rating,
+            "star_desc": star_desc,
+            "star_logic": star_logic,
+            "upside_potential": upside_potential,
+            # 介入度データ
+            "intervention_score": intervention_score,
+            "intervention_comment": intervention_comment,
+            "intervention_reasons": intervention_reasons,
+            "is_platinum": is_platinum,
+            "has_dna": has_dna
         }
     except:
         return None
@@ -303,40 +294,44 @@ with tab1:
             with st.spinner(f'🦅 {len(codes)}銘柄を精密検査中...'):
                 for code in codes:
                     if not code.isdigit(): continue
-                    data = evaluate_stock(f"{code}.T")
+                    data = evaluate_stock(f"{code}.T", mode="search")
                     
                     if data:
                         with st.expander(f"{data['ランク']}ランク | {data['コード']} {data['銘柄名']}", expanded=True):
                             c1, c2 = st.columns([1, 2])
                             with c1:
                                 rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
-                                st.markdown(f"<h2 style='color:{rank_color};'>ランク {data['ランク']}</h2>", unsafe_allow_html=True)
+                                st.markdown(f"<h2 style='color:{rank_color};'>総合判定: {data['ランク']}</h2>", unsafe_allow_html=True)
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{int(data['時価総額'])}** 億円")
-                                if data['DNA']:
-                                    st.success("🧬 **急騰DNAあり** (過去に倍増実績)")
+                                
+                                st.markdown("---")
+                                # 介入度メーター表示
+                                st.markdown(f"### 🦅 ハゲタカ介入度: {data['intervention_score']}%")
+                                st.progress(data['intervention_score'] / 100.0)
+                                st.markdown(f"**{data['intervention_comment']}**")
+                                
+                                # なぜその%なのかの理由
+                                with st.expander("💡 算出ロジック（なぜこの数値？）"):
+                                    st.write("大口投資家が仕掛けやすい条件が揃っているかを自動検出した独自指数です。")
+                                    for reason in data['intervention_reasons']:
+                                        st.caption(reason)
+                                    if not data['intervention_reasons']:
+                                        st.caption("現在、特筆すべき大口介入のシグナルはありません。")
                                 
                             with c2:
                                 st.markdown("##### 📋 AI診断カルテ")
                                 
-                                st.info(f"🔋 **物理ポテンシャル:** {data['pot_rank']}ランク ({data['pot_comment']})")
+                                # 1. お得度（星評価）
+                                st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
+                                st.info(f"💡 **AI解説:** {data['star_logic']}")
                                 
-                                if data['プラチナ']:
-                                    st.success(f"📏 **サイズ感:** {data['size_rank']} ({data['size_comment']})")
-                                elif "特大" in data['size_rank'] or "小さい" in data['size_rank']:
-                                    st.error(f"📏 **サイズ感:** {data['size_rank']} ({data['size_comment']})")
-                                else:
-                                    st.info(f"📏 **サイズ感:** {data['size_rank']} ({data['size_comment']})")
+                                st.markdown("---")
                                 
-                                msg_safe = f"🛡️ **安全性:** {data['safe_rank']} (底値乖離 {data['乖離率']:.1f}%)"
-                                if data['safe_class'] == "success": st.success(msg_safe)
-                                elif data['safe_class'] == "warning": st.warning(msg_safe)
-                                else: st.error(msg_safe)
-                                
-                                msg_inflow = f"🔥 **資金流入:** {data['inflow_rank']}"
-                                if data['inflow_class'] == "success": st.success(msg_inflow)
-                                elif data['inflow_class'] == "warning": st.warning(msg_inflow)
-                                else: st.info(msg_inflow)
+                                # 2. 安全性
+                                msg_safe = f"🛡️ **安全性 (高値掴みリスク):** 底値乖離 {data['乖離率']:.1f}%"
+                                st.write(msg_safe)
+                                st.caption("💡 **AI解説:** 直近の底値から20%以内であれば勝負しやすい範囲です。高すぎる場合は利確の売り浴びせに注意してください。")
 
                             draw_chart(data)
                     else:
@@ -344,33 +339,42 @@ with tab1:
 
 # --- タブ2 ---
 with tab2:
-    st.markdown("##### ハゲタカが潜む銘柄を自動抽出します")
-    if st.button("🚀 スキャン開始", key="scan_btn"):
-        st.info("※デモ動作中：主要銘柄から抽出")
-        demo_codes = ["7203", "9984", "215A", "5032", "1514", "1605", "8306", "7011", "9101", "1787"]
+    st.markdown("##### ハゲタカが潜む銘柄を全市場から抽出します")
+    
+    if st.button("🚀 全市場スキャン開始（約5〜10分）", key="scan_btn"):
+        st.warning("現在スキャン中です。完了するまでブラウザを閉じないでください...")
         
-        results = []
-        progress_bar = st.progress(0)
+        target_codes = [c for c in jpx_codes if c != "4052"] # 除外設定
         
-        for i, code in enumerate(demo_codes):
-            data = evaluate_stock(f"{code}.T")
-            if data and data['ランク'] != "E":
-                results.append(data)
-            progress_bar.progress((i + 1) / len(demo_codes))
-        
-        if results:
-            df = pd.DataFrame(results)
-            rank_map = {"S": 5, "A": 4, "B": 3, "注意": 2, "C": 1}
-            df['score'] = df['ランク'].map(rank_map)
-            df = df.sort_values(by=['score'], ascending=False)
-
-            for index, row in df.iterrows():
-                with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | {row['現在値']}円"):
-                    st.write(f"時価総額: {int(row['時価総額'])}億")
-                    st.write(f"乖離率: {row['乖離率']:.1f}%")
-                    comment = "監視継続"
-                    if row['ランク']=="S": comment = "🔥 激アツ！プラチナ×マグマ"
-                    st.markdown(comment)
-                    draw_chart(row)
+        if not target_codes:
+            st.error("銘柄リストの取得に失敗しました。")
         else:
-            st.warning("該当なし")
+            results = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            total = len(target_codes)
+            for i, code in enumerate(target_codes):
+                status_text.text(f"スキャン中... {i+1} / {total} 銘柄完了")
+                data = evaluate_stock(f"{code}.T", mode="scan")
+                
+                if data:
+                    results.append(data)
+                
+                progress_bar.progress((i + 1) / total)
+            
+            status_text.text(f"スキャン完了！ 有望な {len(results)} 銘柄を発見しました。")
+            
+            if results:
+                df = pd.DataFrame(results)
+                rank_map = {"S": 5, "A": 4, "B": 3, "C": 2}
+                df['score'] = df['ランク'].map(rank_map).fillna(0)
+                df = df.sort_values(by=['score', ' intervention_score'], ascending=[False, False])
+
+                for index, row in df.iterrows():
+                    with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | ハゲタカ介入度: {row['intervention_score']}%"):
+                        st.write(f"時価総額: {int(row['時価総額'])}億 | 乖離率: {row['乖離率']:.1f}%")
+                        st.write(f"**お得度:** {row['star_rating']} {row['star_desc']}")
+                        draw_chart(row)
+            else:
+                st.warning("条件に合致するお宝銘柄は発見されませんでした。")
