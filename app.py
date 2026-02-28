@@ -21,7 +21,6 @@ st.set_page_config(
 # === 🦅 サイドバー：源太流・相場カレンダー ===
 st.sidebar.title("🦅 ハゲタカ戦略室")
 
-# 🎯 修正：コンプライアンス対応（「証拠」→「可能性あり」に変更）
 st.sidebar.markdown("""
 <div style='border: 1px solid #ff4b4b; border-radius: 5px; padding: 15px; margin-bottom: 20px; background-color: rgba(255, 75, 75, 0.05);'>
 <h3 style='margin-top: 0; margin-bottom: 10px; font-size: 1.1rem; color: #ff4b4b;'>🦅 記号の解説</h3>
@@ -141,6 +140,23 @@ def evaluate_stock(ticker, mode="search"):
         
         formatted_mcap = format_market_cap(market_cap_oku)
 
+        # 🎯 追加：商い熱量（株式回転率）の計算と文字列生成
+        if shares > 0 and current_vol > 0:
+            turnover_rate = (current_vol / shares) * 100
+        else:
+            turnover_rate = 0
+            
+        if turnover_rate >= 10.0:
+            turnover_str = f"🔥🔥🔥 {turnover_rate:.2f}% (超異常値・大相場警戒)"
+        elif turnover_rate >= 5.0:
+            turnover_str = f"🔥🔥 {turnover_rate:.2f}% (異常値・大口介入濃厚)"
+        elif turnover_rate >= 2.0:
+            turnover_str = f"🔥 {turnover_rate:.2f}% (動意づき)"
+        elif turnover_rate > 0:
+            turnover_str = f"💤 {turnover_rate:.2f}% (平常運転)"
+        else:
+            turnover_str = "算出不可"
+
         dividend_rate = info.get('dividendRate') or info.get('trailingAnnualDividendRate') or 0
         payout_ratio = info.get('payoutRatio') or 0
         div_yield = info.get('dividendYield') or info.get('trailingAnnualDividendYield') or 0
@@ -225,7 +241,7 @@ def evaluate_stock(ticker, mode="search"):
                 patterns = [
                     ("【高値圏のモメンタム相場】", "上値を抑える壁はなく強いトレンドですが、乖離率が高く高値掴みのリスクがあります。短期戦と割り切った対応が求められる水準です。"),
                     ("【急騰後・リスクリワード低下】", "勢いは非常に強いものの、今からの新規エントリーはリスクとリターンのバランスが取りにくくなっています。慎重な判断が必要です。"),
-                    ("【過熱気味の上昇波】", "上値余地を残しつつも、テクニコル的には過熱感が漂います。無理に深追いせず、冷静に状況を見極めたい局面です。")
+                    ("【過熱気味の上昇波】", "上値余地を残しつつも、テクニカル的には過熱感が漂います。無理に深追いせず、冷静に状況を見極めたい局面です。")
                 ]
         else:
             if pot_level == 4:
@@ -370,6 +386,7 @@ def evaluate_stock(ticker, mode="search"):
             "時価総額": market_cap_oku,
             "時価総額_表示": formatted_mcap,
             "dividend_text": dividend_text,
+            "turnover_str": turnover_str, # 🎯 追加：商い熱量のテキスト
             "ランク": base_rank,
             "警告": warning_text,
             "乖離率": deviation,
@@ -485,6 +502,22 @@ with tab1:
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{data['時価総額_表示']}**")
                                 st.write(f"配当情報: **{data['dividend_text']}**")
+                                # 🎯 追加：商い熱量の表示
+                                st.write(f"商い熱量: **{data['turnover_str']}**")
+                                
+                                # 🎯 追加：商い熱量についての解説アコーディオン
+                                with st.expander("💡 商い熱量（株式回転率）とは？"):
+                                    st.markdown("""
+                                    **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
+                                    この数値は「本物の大口（ハゲタカ）」の介入や、株価が動く「本当のエネルギー」を見極めるための最重要シグナルのひとつです。
+                                    
+                                    * **① 「本物の大口」か「ノイズ」かの見極め**
+                                      前日比で出来高が3倍に増えていても、それが発行済株数の「0.1%」に過ぎなければ、単なる個人の小競り合いに過ぎません。しかし、1日で「5%」や「10%」が取引されていたら、それは巨大な資金が明確に介入し、株主構成が変わるほどの「大相場」の初動（または終焉）の可能性を示唆します。
+                                    * **② 「浮動株」の買い占め（主の住み着き）察知**
+                                      発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
+                                    * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
+                                      上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
+                                    """)
                                 
                                 st.markdown("---")
                                 st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
@@ -571,6 +604,7 @@ with tab2:
                 for index, row in df.iterrows():
                     warning_display = f" <span style='color:#ff4b4b; font-size:0.9em;'>{row['警告']}</span>" if row['警告'] else ""
                     with st.expander(f"【{row['ランク']}】{row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%", expanded=False):
-                        st.markdown(f"**時価総額:** {row['時価総額_表示']} | **配当:** {row['dividend_text']} | {row['safe_judgment']}{warning_display}", unsafe_allow_html=True)
+                        # 🎯 追加：スキャン結果の表示にも熱量を追加
+                        st.markdown(f"**時価総額:** {row['時価総額_表示']} | **配当:** {row['dividend_text']} | **熱量:** {row['turnover_str']} | {row['safe_judgment']}{warning_display}", unsafe_allow_html=True)
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
