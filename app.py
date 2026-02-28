@@ -19,6 +19,22 @@ st.set_page_config(
 
 # === 🦅 サイドバー：源太流・相場カレンダー ===
 st.sidebar.title("🦅 ハゲタカ戦略室")
+
+# サイドバーの記号解説全体を赤い囲みで強調
+st.sidebar.markdown("""
+<div style='border: 1px solid red; border-radius: 5px; padding: 10px; margin-bottom: 20px;'>
+<h3 style='margin-top: 0;'>🦅 記号の解説</h3>
+* **💎 プラチナ (Platinum)**
+    * 時価総額 **500億～2000億円**
+    * ハゲタカが最も仕掛けやすい黄金サイズ.
+* **🦅 ハゲタカ参戦？**
+    * 出来高急増＋株価ヨコヨコ
+    * 水面下での「仕込み」疑惑あり.
+* **🧬 DNA（習性）**
+    * 過去に短期間で急騰した実績あり.
+</div>
+""", unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("📅 2026年 戦略カレンダー")
 
@@ -38,21 +54,6 @@ strategy_text = {
     12: "🎉 **12月：掉尾の一振**\n年末ラリーで全てを利益に変えて逃げ切る。"
 }
 st.sidebar.info(strategy_text.get(current_month, "戦略待機中"))
-
-# サイドバーの記号解説全体を赤い囲みで強調
-st.sidebar.markdown("""
-<div style='border: 1px solid red; border-radius: 5px; padding: 10px; margin-bottom: 20px;'>
-<h3 style='margin-top: 0;'>🦅 記号の解説</h3>
-* **💎 プラチナ (Platinum)**
-    * 時価総額 **500億～2000億円**
-    * ハゲタカが最も仕掛けやすい黄金サイズ.
-* **🦅 ハゲタカ参戦？**
-    * 出来高急増＋株価ヨコヨコ
-    * 水面下での「仕込み」疑惑あり.
-* **🧬 DNA（習性）**
-    * 過去に短期間で急騰した実績あり.
-</div>
-""", unsafe_allow_html=True)
 
 # === 🛠️ 関数定義 ===
 
@@ -225,20 +226,21 @@ def evaluate_stock(ticker, mode="search"):
         vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
         is_platinum = 500 <= market_cap_oku <= 2000
 
-        recent_14_low = hist['Low'][-14:].min()
-        deviation = (current_price - recent_14_low) / recent_14_low * 100
+        # --- ③ 安全性（底値乖離） 20営業日（1ヶ月）に変更 ---
+        recent_20_low = hist['Low'][-20:].min()
+        deviation = (current_price - recent_20_low) / recent_20_low * 100
 
         safe_judgment = ""
         safe_explain = ""
         if deviation <= 3.0:
             safe_judgment = "★ 絶好：底値煮詰まり完了の可能性"
-            safe_explain = "直近最安値からほぼ無乖離です。反発に向けてエネルギーが溜まっていると推測されます。"
+            safe_explain = "直近1ヶ月の最安値からほぼ無乖離です。反発に向けてエネルギーが溜まっていると推測されます。"
         elif deviation <= 5.0:
             safe_judgment = "★ 有望：勝負しやすいエントリー位置"
             safe_explain = "底値からの誤差範囲内であり、資金流入が始まれば上値を追いやすい状態と言えます。"
         elif deviation <= 10.0:
             safe_judgment = "✓ 及第点：トレンド発生の兆候あり"
-            safe_explain = "調整を終え、再度上を目指す展開が期待できる状態です。"
+            safe_explain = "月足目線の調整を終え、再度上を目指す展開が期待できる状態です。"
         elif deviation <= 15.0:
             safe_judgment = "✓ 短期なら：スピード勝負の領域"
             safe_explain = "トレンドは発生中ですが、ここからは短期目線での対応が求められます。深追いは推奨しません。"
@@ -290,6 +292,7 @@ def evaluate_stock(ticker, mode="search"):
             "乖離率": deviation,
             "hist": hist,
             "max_vol_price": max_vol_price,
+            "recent_20_low": recent_20_low, # 追加: チャート描画用
             "star_rating": star_rating,
             "star_desc": star_desc,
             "star_logic": star_logic,
@@ -307,6 +310,7 @@ def evaluate_stock(ticker, mode="search"):
 def draw_chart(row):
     hist_data = row['hist'].tail(150)
     max_vol_price = row['max_vol_price']
+    recent_20_low = row['recent_20_low'] # 追加: 20日底値
     
     bins = 15
     hist_data_copy = hist_data.copy()
@@ -318,8 +322,15 @@ def draw_chart(row):
     fig = make_subplots(rows=1, cols=2, shared_yaxes=True, column_widths=[0.85, 0.15], horizontal_spacing=0)
     fig.add_trace(go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], name="株価", showlegend=False), row=1, col=1)
     fig.add_trace(go.Bar(x=bin_volumes, y=bin_centers, orientation='h', marker_color='rgba(255, 165, 0, 0.6)', name="出来高ボリューム", showlegend=False, hoverinfo='y'), row=1, col=2)
+    
+    # 需給の壁（オレンジ線）
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁", row=1, col=1)
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", row=1, col=2)
+    
+    # 直近底値（青い点線）を追加
+    fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", annotation_text="🔵 直近底値(1ヶ月)", row=1, col=1)
+    fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", row=1, col=2)
+
     fig.update_layout(title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高", xaxis_rangeslider_visible=False, height=350, margin=dict(l=0, r=0, t=30, b=0))
     fig.update_xaxes(showticklabels=False, row=1, col=2)
     st.plotly_chart(fig, use_container_width=True)
@@ -337,11 +348,12 @@ with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】"
     **「上値の需給の壁までどれくらい上昇する余地があるか」**を示します. 星が多いほど邪魔者がおらずスルスル上がりやすい「お宝状態」です.
     
     #### ③ 🚧 安全性（底値乖離）
-    **「直近の底値（過去14営業日の最安値）から何%離れているか」**を示します. 20%を超えると「過熱圏」として高値掴みのリスクが高まります.
+    **「直近の底値（過去20営業日・約1ヶ月の最安値）から何%離れているか」**を示します. 20%を超えると「過熱圏」として高値掴みのリスクが高まります.
     
     #### ④ 📊 チャート ＆ 価格帯別出来高（右側の横棒）
     チャートの右側は、**過去半年間で「どの価格帯でどれだけ取引されたか」**を表します. 一番棒が長いオレンジの点線が**『強力な岩盤（需給の壁）』**です.
-    """)
+    <span style='color: #ffaa00; font-weight: bold;'>⚠️注意: オレンジの線を下回った場合は、含み損を抱えた投資家の「パニック売り（投げ売り）」が出やすくなるため、割ってはならない『下値支持線』としての目安にもなります。</span>
+    """, unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["🔍 複数銘柄一括診断", "🦅 全市場スキャン"])
 
@@ -392,7 +404,6 @@ with tab1:
                                 with st.expander("💡 算出ロジックとAIの解説を見る"): st.info(data['star_logic'])
                                 st.markdown("---")
                                 
-                                # 安全性のタイトルを大きく、AI解説を赤色に変更、解説文を表示
                                 st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（高値掴みリスク）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
                                 st.markdown(f"<div style='color: red; background-color: rgba(255, 75, 75, 0.1); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
                                 st.markdown(f"**（判定: {data['safe_judgment']}）**")
@@ -400,15 +411,16 @@ with tab1:
                                 with st.expander("💡 安全性（底値乖離）の見方を見る"):
                                     safe_explain_html = f"""
                                     <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
-                                    当ツールでは、源太流の「煮詰まり」を判定するため、<strong>過去14営業日（約3週間）の最安値</strong>を「直近の底値」と定義しています.<br>
-                                    この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します.<br><br>
+                                    当ツールでは、源太流の月足ベースの「煮詰まり」を判定するため、<strong>過去20営業日（約1ヶ月）の最安値</strong>を「直近の底値（チャート上の青い点線）」と定義しています。<br>
+                                    この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します。<br><br>
+                                    <span style='color: #ffaa00; font-weight: bold;'>【⚠️警告】需給の壁（オレンジの線）を下回った場合は、含み損を抱えた投資家の「投げ売り（パニック売り）」が出やすくなります。この線は『割ってはならない下値支持線（最終防衛ライン）』としての目安にもなります。</span><br><br>
                                     <strong>【AIの判定基準一覧】</strong><br>
                                     ・<strong>3.0%以内 【★ 絶好】</strong> 底値煮詰まり完了の可能性<br>
                                     　<span style='color: #dddddd; font-size: 0.85rem;'>直近最安値からほぼ無乖離です。反発に向けてエネルギーが溜まっていると推測されます。</span><br>
                                     ・<strong>5.0%以内 【★ 有望】</strong> 勝負しやすいエントリー位置<br>
                                     　<span style='color: #dddddd; font-size: 0.85rem;'>底値からの誤差範囲内であり、資金流入が始まれば上値を追いやすい状態と言えます。</span><br>
                                     ・<strong>10.0%以内 【✓ 及第点】</strong> トレンド発生の兆候あり<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>調整を終え、再度上を目指す展開が期待できる状態です。</span><br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>月足目線の調整を終え、再度上を目指す展開が期待できる状態です。</span><br>
                                     ・<strong>15.0%以内 【✓ 短期なら】</strong> スピード勝負の領域<br>
                                     　<span style='color: #dddddd; font-size: 0.85rem;'>トレンドは発生中ですが、ここからは短期目線での対応が求められます。深追いは推奨しません.</span><br>
                                     ・<strong>20.0%以内 【⚠️ 限界範囲】</strong> 高値掴みに注意<br>
@@ -427,7 +439,6 @@ with tab1:
 with tab2:
     st.markdown("##### ハゲタカが潜む銘柄を自動抽出します")
     
-    # 記号凡例（Legend）を追加して、直感的に分かるように工夫
     st.markdown("""
     <div style='display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;'>
         <div style='background-color: rgba(0, 150, 255, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>💎 プラチナ (黄金サイズ)</div>
@@ -458,7 +469,6 @@ with tab2:
                 df['score'] = df['ランク'].map(rank_map).fillna(0)
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
                 for index, row in df.iterrows():
-                    # 各行に見出し（リストアイコン）を追加
                     icons_prefix = ""
                     if row['has_dna']: icons_prefix += "🧬 "
                     if row['is_platinum']: icons_prefix += "💎 "
