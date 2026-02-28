@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime
 import unicodedata
 import requests
@@ -122,10 +123,21 @@ def evaluate_stock(ticker, mode="scan"):
 
         if current_price <= 300 and mode == "scan": return None
 
+        # --- 時価総額によるカテゴリ分け（AI解説出し分け用） ---
+        if market_cap_oku >= 5000:
+            cap_category = "large"
+            intervention_name = "🏢 機関投資家・大口流入度"
+        elif market_cap_oku >= 50:
+            cap_category = "target"
+            intervention_name = "🦅 ハゲタカ介入度"
+        else:
+            cap_category = "small"
+            intervention_name = "⚠️ イナゴマネー過熱度 (超小型)"
+
         # --- ① 需給の壁（岩盤）の算出 ---
-        hist_6mo = hist.tail(125) # 約半年
-        price_bins = pd.cut(hist_6mo['Close'], bins=10)
-        vol_profile = hist_6mo.groupby(price_bins)['Volume'].sum()
+        hist_6mo = hist.tail(125)
+        price_bins = pd.cut(hist_6mo['Close'], bins=15)
+        vol_profile = hist_6mo.groupby(price_bins, observed=False)['Volume'].sum()
         max_vol_price = vol_profile.idxmax().mid
 
         # --- ② お得度（上昇余地）の星評価ロジック ---
@@ -139,28 +151,39 @@ def evaluate_stock(ticker, mode="scan"):
 
         star_rating = ""
         star_desc = ""
-        star_logic = ""
+        base_logic = ""
         
         if is_blue_sky:
             star_rating = "★★★★★"
             star_desc = "青天井モード（上値抵抗なし！）"
-            star_logic = "上値に目立った需給の壁（抵抗線）がありません。売り手が不在の真空地帯（青空）に突入しており、ハゲタカの買い上げが最も加速しやすいお宝状態です。"
+            base_logic = "上値に目立った需給の壁（抵抗線）がありません。売り手が不在の真空地帯（青空）に突入しています。"
         elif upside_potential >= 30:
             star_rating = "★★★★☆"
             star_desc = f"激アツ（ターゲットまで +{upside_potential:.1f}%）"
-            star_logic = f"需給のターゲット（{int(max_vol_price)}円）まで大きな「のり代」があります。大口が次の壁まで一気に持ち上げるポテンシャルを秘めています。"
+            base_logic = f"最も分厚い需給の壁（{int(max_vol_price)}円付近）まで大きな「のり代」があります。"
         elif upside_potential >= 15:
             star_rating = "★★★☆☆"
             star_desc = f"有望（次の壁まで +{upside_potential:.1f}%）"
-            star_logic = f"次の抵抗線（{int(max_vol_price)}円）まで堅実な上昇が見込める、買い妙味のある水準です。"
+            base_logic = f"次の抵抗線（{int(max_vol_price)}円付近）まで堅実な上昇が見込める水準です。"
         elif upside_potential >= 5:
             star_rating = "★★☆☆☆"
             star_desc = f"普通（次の壁まで +{upside_potential:.1f}%）"
-            star_logic = f"すぐ上に需給の壁（{int(max_vol_price)}円）が迫っています。突破できるかの激戦区になるため、一旦の反落に注意が必要です。"
+            base_logic = f"すぐ上に需給の壁（{int(max_vol_price)}円付近）が迫っています。突破できるかの激戦区です。"
         else:
             star_rating = "★☆☆☆☆"
             star_desc = f"頭打ち警戒（すぐ上に分厚い壁あり）"
-            star_logic = f"現在値のすぐ上（{int(max_vol_price)}円）に強烈な「しこり玉（含み損勢）」が大量に待機しています。ここを抜けるには相当なハゲタカの資金（マグマ）が必要です。"
+            base_logic = f"現在値のすぐ上（{int(max_vol_price)}円付近）に強烈な「しこり玉（含み損勢）」が大量に待機しています。"
+
+        # 時価総額に応じた解説のフレーバー追加
+        flavor_logic = ""
+        if cap_category == "large":
+            flavor_logic = "時価総額が巨大なため『仕手筋の急騰仕掛け』は入りませんが、機関投資家や外国人投資家の資金流入をエンジンとした、強力で重厚なトレンドが期待できます。"
+        elif cap_category == "target":
+            flavor_logic = "ハゲタカが最も好む規模感であり、彼らが資金を投下すれば一気に株価が吹き飛ぶ（または壁を突破する）ポテンシャルを秘めています。"
+        else:
+            flavor_logic = "※ただし時価総額が小さすぎるため、プロは資金を入れづらい銘柄です。主に個人マネーによる『マネーゲーム（乱高下）』になりやすいため、ロットを落とした短期勝負に限定してください。"
+
+        star_logic = base_logic + " " + flavor_logic
 
         # --- 各種指標 ---
         past_1y = hist[-250:]
@@ -174,7 +197,7 @@ def evaluate_stock(ticker, mode="scan"):
         vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
         is_platinum = 500 <= market_cap_oku <= 2000
 
-        # --- ③ ハゲタカ介入度（%）の計算と10%刻み化 ---
+        # --- ③ 介入度（%）の計算と10%刻み化 ---
         intervention_score = 0
         
         if is_platinum: intervention_score += 35
@@ -187,14 +210,14 @@ def evaluate_stock(ticker, mode="scan"):
         if has_dna: intervention_score += 10
         
         intervention_score = min(intervention_score, 100)
-        # 10%単位に丸める処理
         intervention_score = int(round(intervention_score / 10.0)) * 10
         
         intervention_comment = ""
         if intervention_score >= 80:
-            intervention_comment = "🚨 【極めて濃厚】大口の介入シグナルが多数点灯しています！"
+            if cap_category == "large": intervention_comment = "🚨 【極めて濃厚】機関投資家の本格的な資金流入シグナルが点灯！"
+            else: intervention_comment = "🚨 【極めて濃厚】大口（ハゲタカ）の介入シグナルが多数点灯！"
         elif intervention_score >= 50:
-            intervention_comment = "👀 【予兆あり】水面下で集められている可能性があります。"
+            intervention_comment = "👀 【予兆あり】水面下で玉（ぎょく）が集められている可能性があります。"
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません。"
 
@@ -225,6 +248,7 @@ def evaluate_stock(ticker, mode="scan"):
             "star_rating": star_rating,
             "star_desc": star_desc,
             "star_logic": star_logic,
+            "intervention_name": intervention_name,
             "intervention_score": intervention_score,
             "intervention_comment": intervention_comment
         }
@@ -235,15 +259,50 @@ def draw_chart(row):
     hist_data = row['ヒストリ'].tail(150)
     max_vol_price = row['max_vol_price']
     
-    fig = go.Figure()
+    # 価格帯別出来高の計算
+    bins = 15
+    hist_data_copy = hist_data.copy()
+    hist_data_copy['price_bins'] = pd.cut(hist_data_copy['Close'], bins=bins)
+    vol_profile = hist_data_copy.groupby('price_bins', observed=False)['Volume'].sum()
+    bin_centers = [b.mid for b in vol_profile.index]
+    bin_volumes = vol_profile.values
+    
+    # 2画面分割（左：ローソク足、右：価格帯別出来高）
+    fig = make_subplots(rows=1, cols=2, shared_yaxes=True, column_widths=[0.85, 0.15], horizontal_spacing=0)
+    
+    # 左：ローソク足チャート
     fig.add_trace(go.Candlestick(
         x=hist_data.index,
         open=hist_data['Open'], high=hist_data['High'],
         low=hist_data['Low'], close=hist_data['Close'],
-        name="株価"
-    ))
-    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁")
-    fig.update_layout(title=f"{row['銘柄名']} 日足チャート", xaxis_rangeslider_visible=False, height=300, margin=dict(l=0, r=0, t=30, b=0))
+        name="株価",
+        showlegend=False
+    ), row=1, col=1)
+    
+    # 右：価格帯別出来高（横棒グラフ）
+    fig.add_trace(go.Bar(
+        x=bin_volumes,
+        y=bin_centers,
+        orientation='h',
+        marker_color='rgba(255, 165, 0, 0.6)',
+        name="出来高ボリューム",
+        showlegend=False,
+        hoverinfo='y'
+    ), row=1, col=2)
+    
+    # 需給の壁（両方のチャートを貫通する線）
+    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁", row=1, col=1)
+    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", row=1, col=2)
+
+    fig.update_layout(
+        title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高",
+        xaxis_rangeslider_visible=False,
+        height=350,
+        margin=dict(l=0, r=0, t=30, b=0)
+    )
+    # 右側のX軸ラベルを消してスッキリさせる
+    fig.update_xaxes(showticklabels=False, row=1, col=2)
+    
     st.plotly_chart(fig, use_container_width=True)
 
 # === 🖥️ メイン画面 ===
@@ -255,22 +314,21 @@ with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】 
     st.markdown("""
     当ツールは、表向きのニュースや決算に騙されず、市場の裏側で暗躍する大口投資家（ハゲタカ）の『資金の足跡』を追跡するシステムです。
     
-    #### ① 🦅 ハゲタカ介入度（％）
+    #### ① 🦅 介入度（％メーター）
     **「今、大口投資家がこの株を狙っている可能性」**を示します。以下の厳格な物理法則に基づきAIが算出しています。
     * **規模的優位性:** ハゲタカが好む「プラチナチケット（500億〜2000億円）」に該当しているか。
     * **異常出来高の検知:** 個人投資家では作れない不自然な大商い（資金流入の痕跡）があるか。
     * **位置エネルギー:** 過去1年の最安値圏で株価が煮詰まっており、上に跳ねるエネルギーが充填されているか。
     * **仕手化のDNA:** 過去に短期間で株価が倍増した実績（＝同じ主が戻りやすい習性）があるか。
+    ※時価総額が巨大な銘柄は、ハゲタカではなく「機関投資家動向」として自動判定します。
     
     #### ② 🌟 お得度（★マーク）
     決算の数字を使わず、**「過去に投資家がどこで買って捕まっているか」という純粋な需給の法則**だけで上値余地を導き出します。
     星が多いほど、上に邪魔者がおらずスルスルと上がりやすい「お宝銘柄」です。
     
-    #### ③ 🚧 需給の壁チャート（オレンジの点線）
-    **過去半年間で最も多くの投資家が売買を行い、取引量（出来高）が一番集中している価格帯です。**
-    このラインには「含み損を抱えてやれやれ売りを待っている人（しこり玉）」や「押し目買いを狙う人」が密集しているため、株価が反発・反落しやすい**『強力な岩盤』**として機能します。
-    * 現在値がこの線より**「下」**にある場合：当面の目標株価（上値抵抗線）となります。
-    * 現在値がこの線を**「上」**に抜けている場合：売り手が不在の**青天井モード**突入のサインです。
+    #### ③ 🚧 チャート ＆ 価格帯別出来高（右側の横棒）
+    チャートの右側にある横向きの棒グラフは、**過去半年間で「どの価格帯でどれだけ取引されたか」**を表しています。
+    一番棒が長い（取引が集中している）価格帯がオレンジの点線となり、株価が反発・反落しやすい**『強力な岩盤（需給の壁）』**として機能します。
     """)
 
 tab1, tab2 = st.tabs(["🔍 複数銘柄一括診断", "🦅 全市場スキャン"])
@@ -293,16 +351,18 @@ with tab1:
                     data = evaluate_stock(f"{code}.T", mode="search")
                     
                     if data:
-                        with st.expander(f"{data['ランク']}ランク | {data['コード']} {data['銘柄名']}", expanded=True):
+                        with st.container():
+                            st.markdown("---")
                             c1, c2 = st.columns([1, 2])
                             with c1:
                                 rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
                                 st.markdown(f"<h2 style='color:{rank_color};'>総合判定: {data['ランク']}</h2>", unsafe_allow_html=True)
+                                st.write(f"**{data['コード']} {data['銘柄名']}**")
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{int(data['時価総額'])}** 億円")
                                 
                                 st.markdown("---")
-                                st.markdown(f"### 🦅 ハゲタカ介入度: {data['intervention_score']}%")
+                                st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
                                 st.progress(data['intervention_score'] / 100.0)
                                 st.markdown(f"**{data['intervention_comment']}**")
                                 
@@ -311,15 +371,19 @@ with tab1:
                                 
                                 # 1. お得度（需給ターゲット）
                                 st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
-                                st.info(f"💡 **AI解説:** {data['star_logic']}")
+                                # プルダウン式の解説
+                                with st.expander("💡 算出ロジックとAIの解説を見る"):
+                                    st.info(data['star_logic'])
                                 
                                 st.markdown("---")
                                 
                                 # 2. 安全性
                                 msg_safe = f"🛡️ **安全性 (高値掴みリスク):** 底値乖離 {data['乖離率']:.1f}%"
                                 st.write(msg_safe)
-                                st.caption("💡 **AI解説:** 直近の底値から20%以内であれば勝負しやすい範囲です。高すぎる場合は利確の売り浴びせに注意してください。")
+                                with st.expander("💡 安全性の見方"):
+                                    st.caption("直近の底値から20%以内であれば勝負しやすい範囲です。高すぎる場合は利確の売り浴びせに注意してください。")
 
+                            # チャート描画（価格帯別出来高付き）
                             draw_chart(data)
                     else:
                         st.error(f"❌ {code}: データ取得エラー")
@@ -359,7 +423,7 @@ with tab2:
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
 
                 for index, row in df.iterrows():
-                    with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | ハゲタカ介入度: {row['intervention_score']}%"):
+                    with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
                         st.write(f"時価総額: {int(row['時価総額'])}億 | 乖離率: {row['乖離率']:.1f}%")
                         st.write(f"**お得度:** {row['star_rating']} {row['star_desc']}")
                         draw_chart(row)
