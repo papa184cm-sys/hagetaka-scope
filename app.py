@@ -109,21 +109,9 @@ def format_market_cap(oku_val):
     else:
         return f"{oku_val}億円"
 
-def evaluate_stock(ticker, mode="search"):
+def evaluate_stock(ticker):
     try:
         stock = yf.Ticker(ticker)
-
-        if mode == "scan":
-            try:
-                fast = stock.fast_info
-                last_price = getattr(fast, 'last_price', None)
-                if last_price and last_price <= 300: return None
-                mcap = getattr(fast, 'market_cap', None)
-                if mcap:
-                    mcap_oku = mcap / 100000000
-                    if mcap_oku < 50 or mcap_oku > 10000: return None
-            except:
-                pass
 
         hist = stock.history(period="2y")
         if len(hist) < 30: return None
@@ -179,8 +167,6 @@ def evaluate_stock(ticker, mode="search"):
             except:
                 jp_name = info.get('longName', ticker)
 
-        if current_price <= 300 and mode == "scan": return None
-
         if market_cap_oku >= 5000:
             cap_category = "large"
             intervention_name = "🏢 機関投資家・大口流入度"
@@ -197,7 +183,6 @@ def evaluate_stock(ticker, mode="search"):
         max_vol_price = vol_profile.idxmax().mid
         recent_20_low = hist['Low'][-20:].min()
 
-        # 🎯 上値余地（ポテンシャル）の計算：壁までの上昇余地（%）
         upside_potential = 0
         is_blue_sky = False
         
@@ -206,11 +191,8 @@ def evaluate_stock(ticker, mode="search"):
         else:
             upside_potential = ((max_vol_price - current_price) / current_price) * 100
 
-        # 🎯 【神アップデート】安全性の基準を「需給の壁（max_vol_price）」からの乖離率に変更！
-        # マイナスなら壁の下（割安）、プラスなら壁の上（高値警戒）
         deviation = ((current_price - max_vol_price) / max_vol_price) * 100
 
-        # ポテンシャルのベースレベル判定
         if is_blue_sky:
             pot_level = 4
         elif upside_potential >= 30:
@@ -222,8 +204,6 @@ def evaluate_stock(ticker, mode="search"):
         else:
             pot_level = 0
 
-        # 乖離率（壁からの距離）による星の最大数制限（キャップ）
-        # マイナス圏（壁の下）や、壁を抜けた直後（10%以下）はペナルティなし
         if deviation <= 10.0:
             max_stars = 5
         elif deviation <= 20.0:
@@ -322,7 +302,6 @@ def evaluate_stock(ticker, mode="search"):
         is_platinum = 500 <= market_cap_oku <= 2000
         is_magma = vol_ratio >= 1.5
 
-        # 🎯 修正：壁からの乖離率ベースでの安全性判定テキスト（マイナス対応）
         safe_judgment = ""
         safe_explain = ""
         if deviation <= -5.0:
@@ -365,10 +344,6 @@ def evaluate_stock(ticker, mode="search"):
         elif is_platinum and position_score <= 0.3: base_rank = "B"
         else: base_rank = "C"
 
-        if current_price <= 300: base_rank = "E"
-        
-        if mode == "scan" and base_rank in ["D", "E"]: return None
-
         warning_text = ""
         if deviation > 20:
             warning_text = "【注意】※安全性を要確認"
@@ -389,7 +364,7 @@ def evaluate_stock(ticker, mode="search"):
             "turnover_str": turnover_str,
             "ランク": base_rank,
             "警告": warning_text,
-            "乖離率": deviation, # 🎯 マイナス値も出力されるようになります
+            "乖離率": deviation,
             "hist": hist,
             "max_vol_price": max_vol_price,
             "recent_20_low": recent_20_low,
@@ -456,157 +431,113 @@ with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】"
     <span style='color: #ffaa00; font-weight: bold;'>⚠️注意: オレンジの線を下回った場合は、含み損を抱えた投資家の「パニック売り（投げ売り）」が出やすくなるため、割ってはならない『下値支持線』としての目安にもなります。</span>
     """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["🔍 複数銘柄一括診断", "🦅 全市場スキャン"])
+st.markdown("##### 気になる銘柄を入力（スペース区切りで複数可）")
+with st.form(key='search_form'):
+    input_code = st.text_area("銘柄コード", height=68, placeholder="例: 7011 7203 9984")
+    search_btn = st.form_submit_button("🦅 ハゲタカAIで診断する")
 
-with tab1:
-    st.markdown("##### 気になる銘柄を入力（スペース区切りで複数可）")
-    with st.form(key='search_form'):
-        input_code = st.text_area("銘柄コード", height=68, placeholder="例: 7011 7203 9984")
-        search_btn = st.form_submit_button("🦅 ハゲタカAIで診断する")
+if search_btn and input_code:
+    codes = normalize_input(input_code)
+    if not codes: st.error("銘柄コードを入力してください")
+    else:
+        with st.spinner(f'🦅 {len(codes)}銘柄を精密検査中...'):
+            for code in codes:
+                if not code.isdigit(): continue
+                data = evaluate_stock(f"{code}.T")
+                if data:
+                    with st.container():
+                        st.markdown("---")
+                        c1, c2 = st.columns([1, 2])
+                        with c1:
+                            st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
+                            
+                            base_rank = data['ランク']
+                            warning = data['警告']
+                            rank_color = "red" if base_rank == "S" else "orange" if base_rank == "A" else "blue"
+                            
+                            if warning:
+                                rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank} <span style='color:#ff4b4b; font-size:0.8em;'>{warning}</span></h3>"
+                            else:
+                                rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank}</h3>"
+                            
+                            st.markdown(rank_html, unsafe_allow_html=True)
+                            
+                            with st.expander("💡 総合判定の基準を見る"):
+                                st.markdown("""
+                                * **【Sランク】** 大口介入度80%以上 ＋ お得度(上昇余地)30%以上
+                                * **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
+                                * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
+                                * **【Cランク】** 上記以外の標準的な状態
+                                * **【注意】** 需給の壁から20%以上乖離している場合、安全面のアラートが表示されます
+                                """)
 
-    if search_btn and input_code:
-        codes = normalize_input(input_code)
-        if not codes: st.error("銘柄コードを入力してください")
-        else:
-            with st.spinner(f'🦅 {len(codes)}銘柄を精密検査中...'):
-                for code in codes:
-                    if not code.isdigit(): continue
-                    data = evaluate_stock(f"{code}.T", mode="search")
-                    if data:
-                        with st.container():
+                            st.write(f"現在値: **{data['現在値']}** 円")
+                            st.write(f"時価総額: **{data['時価総額_表示']}**")
+                            st.write(f"配当情報: **{data['dividend_text']}**")
+                            st.write(f"商い熱量: **{data['turnover_str']}**")
+                            
+                            with st.expander("💡 商い熱量（株式回転率）とは？"):
+                                st.markdown("""
+                                **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
+                                この数値は「本物の大口（ハゲタカ）」の介入や、株価が動く「本当のエネルギー」を見極めるための最重要シグナルのひとつです。
+                                
+                                * **① 「本物の大口」か「ノイズ」かの見極め**
+                                  前日比で出来高が3倍に増えていても、それが発行済株数の「0.1%」に過ぎなければ、単なる個人の小競り合いに過ぎません。しかし、1日で「5%」や「10%」が取引されていたら、それは巨大な資金が明確に介入し、株主構成が変わるほどの「大相場」の初動（または終焉）の可能性を示唆します。
+                                * **② 「浮動株」の買い占め（主の住み着き）察知**
+                                  発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
+                                * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
+                                  上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
+                                  
+                                ---
+                                **【AIの判定基準目安】**
+                                * **1%未満 【💤 平常運転】**：通常の商いです。まずは静観が基本となります。
+                                * **2%以上 【🔥 動意づき】**：やや熱を帯びてきました。水面下で資金が動き始めている可能性があります。
+                                * **5%以上 【🔥🔥 異常値・大口介入濃厚】**：明確な大口資金の介入や、大相場へ発展する可能性を秘めた激アツ水準です。
+                                * **10%以上 【🔥🔥🔥 超異常値・大相場警戒】**：極めて稀な熱量です。「セリングクライマックス（大暴落の底）」か「バイイングクライマックス（大天井）」の可能性があり、相場の転換点となるケースが多いため警戒と注視が必要です。
+                                """)
+                            
                             st.markdown("---")
-                            c1, c2 = st.columns([1, 2])
-                            with c1:
-                                st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
-                                
-                                base_rank = data['ランク']
-                                warning = data['警告']
-                                rank_color = "red" if base_rank == "S" else "orange" if base_rank == "A" else "blue"
-                                
-                                if warning:
-                                    rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank} <span style='color:#ff4b4b; font-size:0.8em;'>{warning}</span></h3>"
-                                else:
-                                    rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank}</h3>"
-                                
-                                st.markdown(rank_html, unsafe_allow_html=True)
-                                
-                                with st.expander("💡 総合判定の基準を見る"):
-                                    st.markdown("""
-                                    * **【Sランク】** 大口介入度80%以上 ＋ お得度(上昇余地)30%以上
-                                    * **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
-                                    * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
-                                    * **【Cランク】** 上記以外の標準的な状態
-                                    * **【注意】** 需給の壁から20%以上乖離している場合、安全面のアラートが表示されます
-                                    """)
-
-                                st.write(f"現在値: **{data['現在値']}** 円")
-                                st.write(f"時価総額: **{data['時価総額_表示']}**")
-                                st.write(f"配当情報: **{data['dividend_text']}**")
-                                st.write(f"商い熱量: **{data['turnover_str']}**")
-                                
-                                with st.expander("💡 商い熱量（株式回転率）とは？"):
-                                    st.markdown("""
-                                    **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
-                                    この数値は「本物の大口（ハゲタカ）」の介入や、株価が動く「本当のエネルギー」を見極めるための最重要シグナルのひとつです。
-                                    
-                                    * **① 「本物の大口」か「ノイズ」かの見極め**
-                                      前日比で出来高が3倍に増えていても、それが発行済株数の「0.1%」に過ぎなければ、単なる個人の小競り合いに過ぎません。しかし、1日で「5%」や「10%」が取引されていたら、それは巨大な資金が明確に介入し、株主構成が変わるほどの「大相場」の初動（または終焉）の可能性を示唆します。
-                                    * **② 「浮動株」の買い占め（主の住み着き）察知**
-                                      発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
-                                    * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
-                                      上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
-                                      
-                                    ---
-                                    **【AIの判定基準目安】**
-                                    * **1%未満 【💤 平常運転】**：通常の商いです。まずは静観が基本となります。
-                                    * **2%以上 【🔥 動意づき】**：やや熱を帯びてきました。水面下で資金が動き始めている可能性があります。
-                                    * **5%以上 【🔥🔥 異常値・大口介入濃厚】**：明確な大口資金の介入や、大相場へ発展する可能性を秘めた激アツ水準です。
-                                    * **10%以上 【🔥🔥🔥 超異常値・大相場警戒】**：極めて稀な熱量です。「セリングクライマックス（大暴落の底）」か「バイイングクライマックス（大天井）」の可能性があり、相場の転換点となるケースが多いため警戒と注視が必要です。
-                                    """)
-                                
-                                st.markdown("---")
-                                st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
-                                st.progress(data['intervention_score'] / 100.0)
-                                st.markdown(f"**{data['intervention_comment']}**")
-                                
-                            with c2:
-                                st.markdown("##### 📋 AI診断カルテ")
-                                
-                                st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
-                                
-                                st.markdown(f"""
-                                <div style="background-color: rgba(75, 139, 255, 0.08); padding: 15px; border-left: 5px solid #4b8bff; border-radius: 5px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.6;">
-                                {data['star_logic']}
+                            st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
+                            st.progress(data['intervention_score'] / 100.0)
+                            st.markdown(f"**{data['intervention_comment']}**")
+                            
+                        with c2:
+                            st.markdown("##### 📋 AI診断カルテ")
+                            
+                            st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
+                            
+                            st.markdown(f"""
+                            <div style="background-color: rgba(75, 139, 255, 0.08); padding: 15px; border-left: 5px solid #4b8bff; border-radius: 5px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.6;">
+                            {data['star_logic']}
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown("---")
+                            
+                            st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（需給の壁からの乖離率）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='color: {'#ff4b4b' if data['乖離率'] > 10 else '#4b8bff'}; background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"**（判定: {data['safe_judgment']}）**")
+                            
+                            with st.expander("💡 安全性（壁からの乖離と撤退ライン）の見方を見る"):
+                                safe_explain_html = f"""
+                                <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
+                                当ツールでは、安全性を<strong>「最大の需給の壁（オレンジの点線）」からの乖離率（％）</strong>で判定するように進化しました。<br>
+                                マイナス圏（壁より下）は過去のしこり玉を恐れて一般投資家が手を出せない「割安圏」であり、ハゲタカが水面下で仕込む絶好のポイントです。<br><br>
+                                <span style='color: #4b8bff; font-weight: bold;'>【🛡️プロの撤退ルール】マイナス圏で仕込む場合は、直近の底値（青の点線）を下回ったら「シナリオ崩れ」として潔く撤退（損切り）することで、大怪我を防ぐことができます。</span><br><br>
+                                <strong>【AIの判定基準一覧】</strong><br>
+                                ・<strong>-5.0%以下 【📉 割安】</strong> 底値仕込み圏<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁の下に潜伏中。直近底値割れを撤退ラインとし、安値で仕込めるチャンス。</span><br>
+                                ・<strong>0.0%以下 【⚔️ 激戦】</strong> ブレイク前夜<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁へのアタック目前。ここを抜ければ一気に青空が広がる激戦区。</span><br>
+                                ・<strong>+10.0%以内 【🚀 安全圏】</strong> トレンド初動<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁の突破を完了！最も素直に上昇の波に乗りやすいベストタイミング。</span><br>
+                                ・<strong>+20.0%以内 【⚠️ 警戒】</strong> 短期過熱気味<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁から少し離れすぎました。壁付近までの「押し目（下落）」を待つのが無難です。</span><br>
+                                ・<strong>+20.1%以上 【💀 高度な警戒】</strong> 高値掴みリスク大<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁から完全に乖離した超高値圏。今から飛び乗るのは極めて危険です。</span>
                                 </div>
-                                """, unsafe_allow_html=True)
-                                
-                                st.markdown("---")
-                                
-                                # 🎯 修正：UIテキストの文言を「需給の壁からの乖離」に変更
-                                st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（需給の壁からの乖離率）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
-                                st.markdown(f"<div style='color: {'#ff4b4b' if data['乖離率'] > 10 else '#4b8bff'}; background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
-                                st.markdown(f"**（判定: {data['safe_judgment']}）**")
-                                
-                                # 🎯 修正：新しいロジックに基づく解説テキスト
-                                with st.expander("💡 安全性（壁からの乖離と撤退ライン）の見方を見る"):
-                                    safe_explain_html = f"""
-                                    <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
-                                    当ツールでは、安全性を<strong>「最大の需給の壁（オレンジの点線）」からの乖離率（％）</strong>で判定するように進化しました。<br>
-                                    マイナス圏（壁より下）は過去のしこり玉を恐れて一般投資家が手を出せない「割安圏」であり、ハゲタカが水面下で仕込む絶好のポイントです。<br><br>
-                                    <span style='color: #4b8bff; font-weight: bold;'>【🛡️プロの撤退ルール】マイナス圏で仕込む場合は、直近の底値（青の点線）を下回ったら「シナリオ崩れ」として潔く撤退（損切り）することで、大怪我を防ぐことができます。</span><br><br>
-                                    <strong>【AIの判定基準一覧】</strong><br>
-                                    ・<strong>-5.0%以下 【📉 割安】</strong> 底値仕込み圏<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>壁の下に潜伏中。直近底値割れを撤退ラインとし、安値で仕込めるチャンス。</span><br>
-                                    ・<strong>0.0%以下 【⚔️ 激戦】</strong> ブレイク前夜<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>壁へのアタック目前。ここを抜ければ一気に青空が広がる激戦区。</span><br>
-                                    ・<strong>+10.0%以内 【🚀 安全圏】</strong> トレンド初動<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>壁の突破を完了！最も素直に上昇の波に乗りやすいベストタイミング。</span><br>
-                                    ・<strong>+20.0%以内 【⚠️ 警戒】</strong> 短期過熱気味<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>壁から少し離れすぎました。壁付近までの「押し目（下落）」を待つのが無難です。</span><br>
-                                    ・<strong>+20.1%以上 【💀 高度な警戒】</strong> 高値掴みリスク大<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>壁から完全に乖離した超高値圏。今から飛び乗るのは極めて危険です。</span>
-                                    </div>
-                                    """
-                                    st.markdown(safe_explain_html, unsafe_allow_html=True)
+                                """
+                                st.markdown(safe_explain_html, unsafe_allow_html=True)
 
-                            draw_chart(data)
-                    else: st.error(f"❌ {code}: データ取得エラー")
-
-with tab2:
-    st.markdown("##### ハゲタカが潜む銘柄を自動抽出します")
-    
-    st.markdown("""
-    <div style='display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;'>
-        <div style='background-color: rgba(0, 150, 255, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>💎 プラチナ (黄金サイズ)</div>
-        <div style='background-color: rgba(255, 100, 0, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>🦅 ハゲタカ参戦？ (仕込み疑惑)</div>
-        <div style='background-color: rgba(100, 255, 0, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>🧬 DNA (習性) (過去の急騰)</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if st.button("🚀 スキャン開始", key="scan_btn"):
-        st.warning("スキャン中です... ブラウザを閉じないでください...")
-        target_codes = [c for c in jpx_codes if c != "4052"]
-        if not target_codes: st.error("銘柄リストの取得に失敗しました。時間をおいて再度お試しください。")
-        else:
-            results = []
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            total = len(target_codes)
-            for i, code in enumerate(target_codes):
-                status_text.text(f"スキャン中... {i+1} / {total} 銘柄完了")
-                data = evaluate_stock(f"{code}.T", mode="scan")
-                if data: results.append(data)
-                progress_bar.progress((i + 1) / total)
-            status_text.text(f"スキャン完了！ 有望な {len(results)} 銘柄を発見しました。")
-            
-            if results:
-                df = pd.DataFrame(results)
-                rank_map = {"S": 5, "A": 4, "B": 3, "C": 1}
-                df['score'] = df['ランク'].map(rank_map).fillna(0)
-                df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
-                for index, row in df.iterrows():
-                    warning_display = f" <span style='color:#ff4b4b; font-size:0.9em;'>{row['警告']}</span>" if row['警告'] else ""
-                    with st.expander(f"【{row['ランク']}】{row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%", expanded=False):
-                        st.markdown(f"**時価総額:** {row['時価総額_表示']} | **配当:** {row['dividend_text']} | **熱量:** {row['turnover_str']} | {row['safe_judgment']}{warning_display}", unsafe_allow_html=True)
-                        draw_chart(row)
-            else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
+                        draw_chart(data)
+                else: st.error(f"❌ {code}: データ取得エラー")
