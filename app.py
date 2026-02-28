@@ -20,18 +20,15 @@ st.set_page_config(
 # === 🦅 サイドバー：源太流・相場カレンダー ===
 st.sidebar.title("🦅 ハゲタカ戦略室")
 
-# サイドバーの記号解説全体を赤い囲みで強調
+# 修正: サイドバーの記号解説を完全なHTMLリスト化して改行崩れを防止
 st.sidebar.markdown("""
-<div style='border: 1px solid red; border-radius: 5px; padding: 10px; margin-bottom: 20px;'>
-<h3 style='margin-top: 0;'>🦅 記号の解説</h3>
-* **💎 プラチナ (Platinum)**
-    * 時価総額 **500億～2000億円**
-    * ハゲタカが最も仕掛けやすい黄金サイズ.
-* **🦅 ハゲタカ参戦？**
-    * 出来高急増＋株価ヨコヨコ
-    * 水面下での「仕込み」疑惑あり.
-* **🧬 DNA（習性）**
-    * 過去に短期間で急騰した実績あり.
+<div style='border: 1px solid #ff4b4b; border-radius: 5px; padding: 15px; margin-bottom: 20px; background-color: rgba(255, 75, 75, 0.05);'>
+<h3 style='margin-top: 0; margin-bottom: 10px; font-size: 1.1rem; color: #ff4b4b;'>🦅 記号の解説</h3>
+<ul style='padding-left: 20px; margin-bottom: 0; font-size: 0.9rem; line-height: 1.6;'>
+    <li style='margin-bottom: 8px;'><b>💎 プラチナ (Platinum)</b><br>時価総額 <b>500億～2000億円</b><br><span style='color: #dddddd;'>ハゲタカが最も仕掛けやすい黄金サイズ。</span></li>
+    <li style='margin-bottom: 8px;'><b>🦅 ハゲタカ参戦？</b><br>出来高急増（平常時の1.5倍以上）<br><span style='color: #dddddd;'>水面下での「仕込み」疑惑あり。</span></li>
+    <li><b>🧬 DNA（習性）</b><br>過去に短期間で急騰した実績あり。<br><span style='color: #dddddd;'>「主（ぬし）」が住み着いている証拠。</span></li>
+</ul>
 </div>
 """, unsafe_allow_html=True)
 
@@ -224,9 +221,11 @@ def evaluate_stock(ticker, mode="search"):
             
         has_dna = check_dna(hist)
         vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
+        
+        # アイコン判定用フラグ
         is_platinum = 500 <= market_cap_oku <= 2000
+        is_magma = vol_ratio >= 1.5
 
-        # --- ③ 安全性（底値乖離） 20営業日（1ヶ月）に変更 ---
         recent_20_low = hist['Low'][-20:].min()
         deviation = (current_price - recent_20_low) / recent_20_low * 100
 
@@ -282,6 +281,13 @@ def evaluate_stock(ticker, mode="search"):
         if current_price <= 300: total_rank = "E"
         if mode == "scan" and total_rank in ["E", "D", "注意"]: return None
 
+        # --- 表示用アイコン文字列の生成 ---
+        icons_list = []
+        if has_dna: icons_list.append("🧬")
+        if is_platinum: icons_list.append("💎")
+        if is_magma: icons_list.append("🦅")
+        icons_str = " ".join(icons_list)
+
         return {
             "コード": code_only,
             "銘柄名": jp_name,
@@ -292,7 +298,7 @@ def evaluate_stock(ticker, mode="search"):
             "乖離率": deviation,
             "hist": hist,
             "max_vol_price": max_vol_price,
-            "recent_20_low": recent_20_low, # 追加: チャート描画用
+            "recent_20_low": recent_20_low,
             "star_rating": star_rating,
             "star_desc": star_desc,
             "star_logic": star_logic,
@@ -301,8 +307,7 @@ def evaluate_stock(ticker, mode="search"):
             "intervention_comment": intervention_comment,
             "safe_judgment": safe_judgment,
             "safe_explain": safe_explain,
-            "is_platinum": is_platinum,
-            "has_dna": has_dna
+            "icons_str": icons_str # アイコン文字列を辞書に追加
         }
     except:
         return None
@@ -310,7 +315,7 @@ def evaluate_stock(ticker, mode="search"):
 def draw_chart(row):
     hist_data = row['hist'].tail(150)
     max_vol_price = row['max_vol_price']
-    recent_20_low = row['recent_20_low'] # 追加: 20日底値
+    recent_20_low = row['recent_20_low']
     
     bins = 15
     hist_data_copy = hist_data.copy()
@@ -323,12 +328,16 @@ def draw_chart(row):
     fig.add_trace(go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], name="株価", showlegend=False), row=1, col=1)
     fig.add_trace(go.Bar(x=bin_volumes, y=bin_centers, orientation='h', marker_color='rgba(255, 165, 0, 0.6)', name="出来高ボリューム", showlegend=False, hoverinfo='y'), row=1, col=2)
     
-    # 需給の壁（オレンジ線）
-    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", annotation_text="🚧 需給の壁", row=1, col=1)
+    # 修正: 需給の壁（オレンジ線）に正確な株価ラベルを追加（左側に表示）
+    fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", 
+                  annotation_text=f" {int(max_vol_price)}円 🚧 需給の壁 ", 
+                  annotation_position="top left", annotation_font_color="orange", row=1, col=1)
     fig.add_hline(y=max_vol_price, line_width=2, line_dash="dash", line_color="orange", row=1, col=2)
     
-    # 直近底値（青い点線）を追加
-    fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", annotation_text="🔵 直近底値(1ヶ月)", row=1, col=1)
+    # 修正: 直近底値（青い点線）に正確な株価ラベルを追加（左側に表示）
+    fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", 
+                  annotation_text=f" {int(recent_20_low)}円 🔵 直近底値(1ヶ月) ", 
+                  annotation_position="bottom left", annotation_font_color="cyan", row=1, col=1)
     fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", row=1, col=2)
 
     fig.update_layout(title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高", xaxis_rangeslider_visible=False, height=350, margin=dict(l=0, r=0, t=30, b=0))
@@ -388,7 +397,8 @@ with tab1:
                                     * **【注意】** 底値乖離が20%を超えており、高値掴みに注意
                                     """)
 
-                                st.write(f"**{data['コード']} {data['銘柄名']}**")
+                                # 修正: 検索画面の銘柄名にも記号（アイコン）を表示
+                                st.markdown(f"<h3 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h3>", unsafe_allow_html=True)
                                 st.write(f"現在値: **{data['現在値']}** 円")
                                 st.write(f"時価総額: **{data['時価総額_表示']}**")
                                 
@@ -469,11 +479,8 @@ with tab2:
                 df['score'] = df['ランク'].map(rank_map).fillna(0)
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
                 for index, row in df.iterrows():
-                    icons_prefix = ""
-                    if row['has_dna']: icons_prefix += "🧬 "
-                    if row['is_platinum']: icons_prefix += "💎 "
-                    
-                    with st.expander(f"【{row['ランク']}】 {icons_prefix}{row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
+                    # 修正: スキャン画面の銘柄名にも記号（アイコン）を表示
+                    with st.expander(f"【{row['ランク']}】 {row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
                         st.write(f"時価総額: **{row['時価総額_表示']}** | {row['safe_judgment']}")
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
