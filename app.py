@@ -39,18 +39,20 @@ strategy_text = {
 }
 st.sidebar.info(strategy_text.get(current_month, "戦略待機中"))
 
-st.sidebar.markdown("---")
+# サイドバーの記号解説全体を赤い囲みで強調
 st.sidebar.markdown("""
-### 🦅 記号の解説
+<div style='border: 1px solid red; border-radius: 5px; padding: 10px; margin-bottom: 20px;'>
+<h3 style='margin-top: 0;'>🦅 記号の解説</h3>
 * **💎 プラチナ (Platinum)**
     * 時価総額 **500億～2000億円**
-    * ハゲタカが最も仕掛けやすい黄金サイズ。
+    * ハゲタカが最も仕掛けやすい黄金サイズ.
 * **🦅 ハゲタカ参戦？**
     * 出来高急増＋株価ヨコヨコ
-    * 水面下での「仕込み」疑惑あり。
+    * 水面下での「仕込み」疑惑あり.
 * **🧬 DNA（習性）**
-    * 過去に短期間で急騰した実績あり。
-""")
+    * 過去に短期間で急騰した実績あり.
+</div>
+""", unsafe_allow_html=True)
 
 # === 🛠️ 関数定義 ===
 
@@ -295,7 +297,9 @@ def evaluate_stock(ticker, mode="search"):
             "intervention_score": intervention_score,
             "intervention_comment": intervention_comment,
             "safe_judgment": safe_judgment,
-            "safe_explain": safe_explain
+            "safe_explain": safe_explain,
+            "is_platinum": is_platinum,
+            "has_dna": has_dna
         }
     except:
         return None
@@ -388,17 +392,16 @@ with tab1:
                                 with st.expander("💡 算出ロジックとAIの解説を見る"): st.info(data['star_logic'])
                                 st.markdown("---")
                                 
-                                msg_safe_main = f"🛡️ **安全性 (高値掴みリスク):** {data['safe_judgment']}"
-                                st.write(msg_safe_main)
-                                st.caption(f"💡 AI解説: {data['safe_explain']}")
-                                st.markdown(f"**（底値からの乖離率: {data['乖離率']:.1f}%）**")
+                                # 安全性のタイトルを大きく、AI解説を赤色に変更、解説文を表示
+                                st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（高値掴みリスク）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='color: red; background-color: rgba(255, 75, 75, 0.1); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
+                                st.markdown(f"**（判定: {data['safe_judgment']}）**")
                                 
-                                # 完全な説明文付きで復元
                                 with st.expander("💡 安全性（底値乖離）の見方を見る"):
                                     safe_explain_html = f"""
                                     <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
-                                    当ツールでは、源太流の「煮詰まり」を判定するため、<strong>過去14営業日（約3週間）の最安値</strong>を「直近の底値」と定義しています。<br>
-                                    この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します。<br><br>
+                                    当ツールでは、源太流の「煮詰まり」を判定するため、<strong>過去14営業日（約3週間）の最安値</strong>を「直近の底値」と定義しています.<br>
+                                    この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します.<br><br>
                                     <strong>【AIの判定基準一覧】</strong><br>
                                     ・<strong>3.0%以内 【★ 絶好】</strong> 底値煮詰まり完了の可能性<br>
                                     　<span style='color: #dddddd; font-size: 0.85rem;'>直近最安値からほぼ無乖離です。反発に向けてエネルギーが溜まっていると推測されます。</span><br>
@@ -407,13 +410,13 @@ with tab1:
                                     ・<strong>10.0%以内 【✓ 及第点】</strong> トレンド発生の兆候あり<br>
                                     　<span style='color: #dddddd; font-size: 0.85rem;'>調整を終え、再度上を目指す展開が期待できる状態です。</span><br>
                                     ・<strong>15.0%以内 【✓ 短期なら】</strong> スピード勝負の領域<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>トレンドは発生中ですが、ここからは短期目線での対応が求められます。深追いは推奨しません。</span><br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>トレンドは発生中ですが、ここからは短期目線での対応が求められます。深追いは推奨しません.</span><br>
                                     ・<strong>20.0%以内 【⚠️ 限界範囲】</strong> 高値掴みに注意<br>
                                     　<span style='color: #dddddd; font-size: 0.85rem;'>当ツールが一般的な勝負圏内と判断する目安の限界です。これ以上の価格追いはリスクが高まる傾向にあります。</span><br>
                                     ・<strong>30.0%以内 【❌ 警戒】</strong> 短期的な過熱感あり<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>すでに大きく動いており、大口の利益確定売りに押されるリスクが高まっています。</span><br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>すでに大きく動いており、大口の利益確定売りに押されるリスクが高まっています.</span><br>
                                     ・<strong>30.1%以上 【💀 高度な警戒】</strong> 上級者向けの過熱圏<br>
-                                    　<span style='color: #dddddd; font-size: 0.85rem;'>短期的な高値掴みとなる可能性が高い水準です。新規参戦は極めて慎重に行う必要があり、上級者向けのタイミングと言えます。</span>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>短期的な高値掴みとなる可能性が高い水準です。新規参戦は極めて慎重に行う必要があり、上級者向けのタイミングと言えます.</span>
                                     </div>
                                     """
                                     st.markdown(safe_explain_html, unsafe_allow_html=True)
@@ -422,8 +425,18 @@ with tab1:
                     else: st.error(f"❌ {code}: データ取得エラー")
 
 with tab2:
-    st.markdown("##### ハゲタカが潜む銘柄を全市場から抽出します")
-    if st.button("🚀 全市場スキャン開始", key="scan_btn"):
+    st.markdown("##### ハゲタカが潜む銘柄を自動抽出します")
+    
+    # 記号凡例（Legend）を追加して、直感的に分かるように工夫
+    st.markdown("""
+    <div style='display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;'>
+        <div style='background-color: rgba(0, 150, 255, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>💎 プラチナ (黄金サイズ)</div>
+        <div style='background-color: rgba(255, 100, 0, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>🦅 ハゲタカ参戦？ (仕込み疑惑)</div>
+        <div style='background-color: rgba(100, 255, 0, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>🧬 DNA (習性) (過去の急騰)</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🚀 スキャン開始", key="scan_btn"):
         st.warning("スキャン中です... ブラウザを閉じないでください...")
         target_codes = [c for c in jpx_codes if c != "4052"]
         if not target_codes: st.error("銘柄リストの取得に失敗しました。時間をおいて再度お試しください。")
@@ -445,7 +458,12 @@ with tab2:
                 df['score'] = df['ランク'].map(rank_map).fillna(0)
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
                 for index, row in df.iterrows():
-                    with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
+                    # 各行に見出し（リストアイコン）を追加
+                    icons_prefix = ""
+                    if row['has_dna']: icons_prefix += "🧬 "
+                    if row['is_platinum']: icons_prefix += "💎 "
+                    
+                    with st.expander(f"【{row['ランク']}】 {icons_prefix}{row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
                         st.write(f"時価総額: **{row['時価総額_表示']}** | {row['safe_judgment']}")
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
