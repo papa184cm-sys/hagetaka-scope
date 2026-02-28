@@ -21,13 +21,14 @@ st.set_page_config(
 # === 🦅 サイドバー：源太流・相場カレンダー ===
 st.sidebar.title("🦅 ハゲタカ戦略室")
 
+# 🎯 修正：コンプライアンス対応（「証拠」→「可能性あり」に変更）
 st.sidebar.markdown("""
 <div style='border: 1px solid #ff4b4b; border-radius: 5px; padding: 15px; margin-bottom: 20px; background-color: rgba(255, 75, 75, 0.05);'>
 <h3 style='margin-top: 0; margin-bottom: 10px; font-size: 1.1rem; color: #ff4b4b;'>🦅 記号の解説</h3>
 <ul style='padding-left: 20px; margin-bottom: 0; font-size: 0.9rem; line-height: 1.6;'>
     <li style='margin-bottom: 8px;'><b>💎 プラチナ (Platinum)</b><br>時価総額 <b>500億～2000億円</b><br><span style='color: #dddddd;'>ハゲタカが最も仕掛けやすい黄金サイズ。</span></li>
     <li style='margin-bottom: 8px;'><b>🦅 ハゲタカ参戦？</b><br>出来高急増（平常時の1.5倍以上）<br><span style='color: #dddddd;'>水面下での「仕込み」疑惑あり。</span></li>
-    <li><b>🧬 DNA（習性）</b><br>過去に短期間で急騰した実績あり。<br><span style='color: #dddddd;'>「主（ぬし）」が住み着いている証拠。</span></li>
+    <li><b>🧬 DNA（習性）</b><br>過去に短期間で急騰した実績あり。<br><span style='color: #dddddd;'>「主（ぬし）」が住み着いている可能性あり。</span></li>
 </ul>
 </div>
 """, unsafe_allow_html=True)
@@ -191,7 +192,6 @@ def evaluate_stock(ticker, mode="search"):
         recent_20_low = hist['Low'][-20:].min()
         deviation = (current_price - recent_20_low) / recent_20_low * 100
 
-        # 🎯 新機能：上値余地（ポテンシャル）のベースレベルを判定
         if is_blue_sky:
             pot_level = 4
         elif upside_potential >= 30:
@@ -203,7 +203,6 @@ def evaluate_stock(ticker, mode="search"):
         else:
             pot_level = 0
 
-        # 🎯 新機能：乖離率（高値掴みリスク）による星の最大数制限（キャップ）
         if deviation <= 10.0:
             max_stars = 5
         elif deviation <= 20.0:
@@ -211,28 +210,24 @@ def evaluate_stock(ticker, mode="search"):
         else:
             max_stars = 3
 
-        # 最終的な星数を決定（ポテンシャルレベル+1 が本来の星数。それを最大数で制限する）
         raw_stars = pot_level + 1
         final_stars = min(raw_stars, max_stars)
         star_rating = "★" * final_stars + "☆" * (5 - final_stars)
 
-        # 🎯 修正：星の制限有無に応じた、コンプライアンス対応済みの30パターンテキスト
         if raw_stars > final_stars:
-            # 【制限がかかった場合（過熱感あり）の専用テキスト】
             if final_stars == 4:
                 patterns = [
                     ("【上昇トレンド・高値警戒】", "上値の壁は薄いものの、直近底値からの上昇が続いており、新規参入は短期目線での対応が無難な水準です。"),
                     ("【モメンタム継続・押し目待ち】", "強い勢いを保っていますが、やや過熱感が出てきました。リスクを抑えるなら押し目を待つのが一案です。"),
                     ("【高値圏の順張り局面】", "上値余地はありますが、すでに一定の上昇を遂げています。利益確定売りに警戒しつつの判断が求められます。")
                 ]
-            else: # final_stars == 3
+            else:
                 patterns = [
                     ("【高値圏のモメンタム相場】", "上値を抑える壁はなく強いトレンドですが、乖離率が高く高値掴みのリスクがあります。短期戦と割り切った対応が求められる水準です。"),
                     ("【急騰後・リスクリワード低下】", "勢いは非常に強いものの、今からの新規エントリーはリスクとリターンのバランスが取りにくくなっています。慎重な判断が必要です。"),
-                    ("【過熱気味の上昇波】", "上値余地を残しつつも、テクニカル的には過熱感が漂います。無理に深追いせず、冷静に状況を見極めたい局面です。")
+                    ("【過熱気味の上昇波】", "上値余地を残しつつも、テクニコル的には過熱感が漂います。無理に深追いせず、冷静に状況を見極めたい局面です。")
                 ]
         else:
-            # 【制限がかからなかった場合（通常）のテキスト】
             if pot_level == 4:
                 patterns = [
                     ("【青天井モード】", "上値に目立った需給の壁（抵抗線）がなく、売り手が不在の真空地帯に突入しています。"),
@@ -306,7 +301,6 @@ def evaluate_stock(ticker, mode="search"):
         is_platinum = 500 <= market_cap_oku <= 2000
         is_magma = vol_ratio >= 1.5
 
-        # 🎯 修正：コンプライアンス対応（安全性の判定文言からも「推奨」を排除）
         safe_judgment = ""
         safe_explain = ""
         if deviation <= 3.0:
