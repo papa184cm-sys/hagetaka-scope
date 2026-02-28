@@ -48,7 +48,6 @@ st.sidebar.markdown("""
     * 水面下での「仕込み」疑惑あり。
 * **🧬 DNA（習性）**
     * 過去に短期間で急騰した実績あり。
-    * 「主（ぬし）」が住み着いている証拠。
 """)
 
 # === 🛠️ 関数定義 ===
@@ -96,13 +95,11 @@ def evaluate_stock(ticker, mode="scan"):
             try:
                 fast = stock.fast_info
                 last_price = getattr(fast, 'last_price', None)
-                if last_price and last_price <= 300:
-                    return None
+                if last_price and last_price <= 300: return None
                 mcap = getattr(fast, 'market_cap', None)
                 if mcap:
                     mcap_oku = mcap / 100000000
-                    if mcap_oku < 50 or mcap_oku > 10000:
-                        return None
+                    if mcap_oku < 50 or mcap_oku > 10000: return None
             except:
                 pass
 
@@ -123,52 +120,52 @@ def evaluate_stock(ticker, mode="scan"):
         code_only = ticker.replace(".T", "")
         jp_name = jpx_names.get(code_only, info.get('longName', ticker))
 
-        if current_price <= 300:
-            if mode == "scan": return None
+        if current_price <= 300 and mode == "scan": return None
 
-        # --- ① お得度（上昇余地）の星評価ロジック ---
-        past_1y = hist[-250:]
-        year_high = past_1y['High'].max()
-        year_low = past_1y['Low'].min()
-        
-        # BPS（1株当たり純資産）を取得。取得できない場合は直近1年高値を仮の理論株価とする
-        bps = info.get('bookValue', 0)
-        target_price = max(year_high, bps) if bps > 0 else year_high
-        
+        # --- ① 需給の壁（岩盤）の算出 ---
+        hist_6mo = hist.tail(125) # 約半年
+        price_bins = pd.cut(hist_6mo['Close'], bins=10)
+        vol_profile = hist_6mo.groupby(price_bins)['Volume'].sum()
+        max_vol_price = vol_profile.idxmax().mid
+
+        # --- ② お得度（上昇余地）の星評価ロジック ---
         upside_potential = 0
-        if current_price > 0 and target_price > current_price:
-            upside_potential = ((target_price - current_price) / current_price) * 100
+        is_blue_sky = False
+        
+        if current_price >= max_vol_price:
+            is_blue_sky = True
+        else:
+            upside_potential = ((max_vol_price - current_price) / current_price) * 100
 
         star_rating = ""
         star_desc = ""
-        star_logic = f"理論株価({int(target_price)}円)と現在値を比較した「お得度」です。"
+        star_logic = ""
         
-        if upside_potential >= 50:
+        if is_blue_sky:
             star_rating = "★★★★★"
-            star_desc = "お宝（上昇余地 +50% 以上）"
-            star_logic += " 解散価値(PBR1倍)や過去高値から見て、強烈な割安水準に放置されています。"
+            star_desc = "青天井モード（上値抵抗なし！）"
+            star_logic = "上値に目立った需給の壁（抵抗線）がありません。売り手が不在の真空地帯（青空）に突入しており、ハゲタカの買い上げが最も加速しやすいお宝状態です。"
         elif upside_potential >= 30:
             star_rating = "★★★★☆"
-            star_desc = "激アツ（上昇余地 +30% 〜 +50%）"
-            star_logic += " 大口が買い上げを狙うには十分すぎる「のり代」があります。"
+            star_desc = f"激アツ（ターゲットまで +{upside_potential:.1f}%）"
+            star_logic = f"需給のターゲット（{int(max_vol_price)}円）まで大きな「のり代」があります。大口が次の壁まで一気に持ち上げるポテンシャルを秘めています。"
         elif upside_potential >= 15:
             star_rating = "★★★☆☆"
-            star_desc = "有望（上昇余地 +15% 〜 +30%）"
-            star_logic += " 堅実な上昇が見込める、買い妙味のある水準です。"
+            star_desc = f"有望（次の壁まで +{upside_potential:.1f}%）"
+            star_logic = f"次の抵抗線（{int(max_vol_price)}円）まで堅実な上昇が見込める、買い妙味のある水準です。"
         elif upside_potential >= 5:
             star_rating = "★★☆☆☆"
-            star_desc = "普通（上昇余地 +5% 〜 +15%）"
-            star_logic += " 適正価格に近く、大きな上値は期待しづらい状態です。"
-        elif upside_potential > 0:
-            star_rating = "★☆☆☆☆"
-            star_desc = "トントン（上昇余地 0% 〜 +5%）"
-            star_logic += " ほぼ理論株価に到達しており、旨味は少ないです。"
+            star_desc = f"普通（次の壁まで +{upside_potential:.1f}%）"
+            star_logic = f"すぐ上に需給の壁（{int(max_vol_price)}円）が迫っています。突破できるかの激戦区になるため、一旦の反落に注意が必要です。"
         else:
-            star_rating = "☆☆☆☆☆"
-            star_desc = "割高（上昇余地 0% 未満）"
-            star_logic += " ※ただし、すでに活況入りしている可能性もあるため、トレンドを追う短期勝負の順張りならトライする価値はあります。"
+            star_rating = "★☆☆☆☆"
+            star_desc = f"頭打ち警戒（すぐ上に分厚い壁あり）"
+            star_logic = f"現在値のすぐ上（{int(max_vol_price)}円）に強烈な「しこり玉（含み損勢）」が大量に待機しています。ここを抜けるには相当なハゲタカの資金（マグマ）が必要です。"
 
-        # --- ② 各種指標の取得 ---
+        # --- 各種指標 ---
+        past_1y = hist[-250:]
+        year_high = past_1y['High'].max()
+        year_low = past_1y['Low'].min()
         position_score = 0.5
         if year_high != year_low:
             position_score = (current_price - year_low) / (year_high - year_low)
@@ -176,40 +173,23 @@ def evaluate_stock(ticker, mode="scan"):
         has_dna = check_dna(hist)
         vol_ratio = current_vol / avg_vol_100 if avg_vol_100 > 0 else 0
         is_platinum = 500 <= market_cap_oku <= 2000
-        is_magma = vol_ratio > 1.5
 
-        # --- ③ ハゲタカ介入度（%）メーターのロジック ---
+        # --- ③ ハゲタカ介入度（%）の計算と10%刻み化 ---
         intervention_score = 0
-        intervention_reasons = []
-
-        # サイズ感（大口の狙いやすさ）
-        if is_platinum:
-            intervention_score += 35
-            intervention_reasons.append("✓ プラチナレンジ：大口が最も仕掛けやすい黄金サイズ(500〜2000億)")
-        elif 100 <= market_cap_oku <= 5000:
-            intervention_score += 15
-            intervention_reasons.append("✓ ターゲット圏内：機関投資家が売買可能な企業規模")
-
-        # 資金流入（出来高異常）
-        if vol_ratio >= 3.0:
-            intervention_score += 40
-            intervention_reasons.append(f"✓ 資金流入：出来高が平常時の{vol_ratio:.1f}倍！ステルス集積の疑い極めて濃厚")
-        elif vol_ratio >= 1.5:
-            intervention_score += 25
-            intervention_reasons.append(f"✓ 資金流入：出来高急増({vol_ratio:.1f}倍)。ハゲタカ参戦の兆候あり")
-
-        # 底値圏の煮詰まり・DNA
-        if position_score <= 0.2:
-            intervention_score += 15
-            intervention_reasons.append("✓ 位置エネルギー：底値圏で煮詰まっており、反発のエネルギーが充填済み")
-        if has_dna:
-            intervention_score += 10
-            intervention_reasons.append("✓ 急騰DNA：過去に短期間で倍増した実績（仕手化の習性）あり")
-
-        # 上限100%に丸める
-        intervention_score = min(intervention_score, 100)
         
-        # 介入度の判定コメント
+        if is_platinum: intervention_score += 35
+        elif 100 <= market_cap_oku <= 5000: intervention_score += 15
+        
+        if vol_ratio >= 3.0: intervention_score += 40
+        elif vol_ratio >= 1.5: intervention_score += 25
+        
+        if position_score <= 0.2: intervention_score += 15
+        if has_dna: intervention_score += 10
+        
+        intervention_score = min(intervention_score, 100)
+        # 10%単位に丸める処理
+        intervention_score = int(round(intervention_score / 10.0)) * 10
+        
         intervention_comment = ""
         if intervention_score >= 80:
             intervention_comment = "🚨 【極めて濃厚】大口の介入シグナルが多数点灯しています！"
@@ -218,13 +198,13 @@ def evaluate_stock(ticker, mode="scan"):
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません。"
 
-        # --- 安全性（乖離率） ---
+        # --- 安全性 ---
         recent_14_low = hist['Low'][-14:].min()
         deviation = (current_price - recent_14_low) / recent_14_low * 100
 
         # --- 総合ランク ---
         total_rank = "D"
-        if intervention_score >= 80 and upside_potential >= 30: total_rank = "S"
+        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): total_rank = "S"
         elif intervention_score >= 60: total_rank = "A"
         elif is_platinum and position_score <= 0.3: total_rank = "B"
         elif deviation > 20: total_rank = "注意"
@@ -241,26 +221,19 @@ def evaluate_stock(ticker, mode="scan"):
             "ランク": total_rank,
             "乖離率": deviation,
             "ヒストリ": hist,
-            # お得度データ
+            "max_vol_price": max_vol_price,
             "star_rating": star_rating,
             "star_desc": star_desc,
             "star_logic": star_logic,
-            "upside_potential": upside_potential,
-            # 介入度データ
             "intervention_score": intervention_score,
-            "intervention_comment": intervention_comment,
-            "intervention_reasons": intervention_reasons,
-            "is_platinum": is_platinum,
-            "has_dna": has_dna
+            "intervention_comment": intervention_comment
         }
     except:
         return None
 
 def draw_chart(row):
     hist_data = row['ヒストリ'].tail(150)
-    price_bins = pd.cut(hist_data['Close'], bins=10)
-    vol_profile = hist_data.groupby(price_bins)['Volume'].sum()
-    max_vol_price = vol_profile.idxmax().mid
+    max_vol_price = row['max_vol_price']
     
     fig = go.Figure()
     fig.add_trace(go.Candlestick(
@@ -276,6 +249,29 @@ def draw_chart(row):
 # === 🖥️ メイン画面 ===
 st.title("🦅 源太AI・ハゲタカscope")
 st.caption("Pro Version: 2026.02 | Target: VIP Members")
+
+# --- 🔰 トリセツ（使い方ガイド） ---
+with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】 ※初めての方はお読みください"):
+    st.markdown("""
+    当ツールは、表向きのニュースや決算に騙されず、市場の裏側で暗躍する大口投資家（ハゲタカ）の『資金の足跡』を追跡するシステムです。
+    
+    #### ① 🦅 ハゲタカ介入度（％）
+    **「今、大口投資家がこの株を狙っている可能性」**を示します。以下の厳格な物理法則に基づきAIが算出しています。
+    * **規模的優位性:** ハゲタカが好む「プラチナチケット（500億〜2000億円）」に該当しているか。
+    * **異常出来高の検知:** 個人投資家では作れない不自然な大商い（資金流入の痕跡）があるか。
+    * **位置エネルギー:** 過去1年の最安値圏で株価が煮詰まっており、上に跳ねるエネルギーが充填されているか。
+    * **仕手化のDNA:** 過去に短期間で株価が倍増した実績（＝同じ主が戻りやすい習性）があるか。
+    
+    #### ② 🌟 お得度（★マーク）
+    決算の数字を使わず、**「過去に投資家がどこで買って捕まっているか」という純粋な需給の法則**だけで上値余地を導き出します。
+    星が多いほど、上に邪魔者がおらずスルスルと上がりやすい「お宝銘柄」です。
+    
+    #### ③ 🚧 需給の壁チャート（オレンジの点線）
+    **過去半年間で最も多くの投資家が売買を行い、取引量（出来高）が一番集中している価格帯です。**
+    このラインには「含み損を抱えてやれやれ売りを待っている人（しこり玉）」や「押し目買いを狙う人」が密集しているため、株価が反発・反落しやすい**『強力な岩盤』**として機能します。
+    * 現在値がこの線より**「下」**にある場合：当面の目標株価（上値抵抗線）となります。
+    * 現在値がこの線を**「上」**に抜けている場合：売り手が不在の**青天井モード**突入のサインです。
+    """)
 
 tab1, tab2 = st.tabs(["🔍 複数銘柄一括診断", "🦅 全市場スキャン"])
 
@@ -306,23 +302,14 @@ with tab1:
                                 st.write(f"時価総額: **{int(data['時価総額'])}** 億円")
                                 
                                 st.markdown("---")
-                                # 介入度メーター表示
                                 st.markdown(f"### 🦅 ハゲタカ介入度: {data['intervention_score']}%")
                                 st.progress(data['intervention_score'] / 100.0)
                                 st.markdown(f"**{data['intervention_comment']}**")
                                 
-                                # なぜその%なのかの理由
-                                with st.expander("💡 算出ロジック（なぜこの数値？）"):
-                                    st.write("大口投資家が仕掛けやすい条件が揃っているかを自動検出した独自指数です。")
-                                    for reason in data['intervention_reasons']:
-                                        st.caption(reason)
-                                    if not data['intervention_reasons']:
-                                        st.caption("現在、特筆すべき大口介入のシグナルはありません。")
-                                
                             with c2:
                                 st.markdown("##### 📋 AI診断カルテ")
                                 
-                                # 1. お得度（星評価）
+                                # 1. お得度（需給ターゲット）
                                 st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
                                 st.info(f"💡 **AI解説:** {data['star_logic']}")
                                 
@@ -369,7 +356,7 @@ with tab2:
                 df = pd.DataFrame(results)
                 rank_map = {"S": 5, "A": 4, "B": 3, "C": 2}
                 df['score'] = df['ランク'].map(rank_map).fillna(0)
-                df = df.sort_values(by=['score', ' intervention_score'], ascending=[False, False])
+                df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
 
                 for index, row in df.iterrows():
                     with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | ハゲタカ介入度: {row['intervention_score']}%"):
