@@ -9,6 +9,7 @@ import unicodedata
 import requests
 import io
 import re
+import random  # 🎯 追加：30パターンのランダム選択用
 
 # === ⚙️ ページ設定 ===
 st.set_page_config(
@@ -187,40 +188,72 @@ def evaluate_stock(ticker, mode="search"):
         else:
             upside_potential = ((max_vol_price - current_price) / current_price) * 100
 
-        star_rating = ""
-        star_desc = ""
-        base_logic = ""
-        
+        # 🎯 修正：全30パターンのテキストからランダム選択
         if is_blue_sky:
             star_rating = "★★★★★"
-            star_desc = "青天井モード（上値抵抗なし！）"
-            base_logic = "上値に目立った需給の壁（抵抗線）がありません. 売り手が不在の真空地帯（青空）に突入しています."
+            patterns = [
+                ("【青天井モード】", "上値に目立った需給の壁（抵抗線）がなく、売り手が不在の真空地帯に突入しています。"),
+                ("【上値抵抗クリア】", "過去の重いしこり玉（含み損）エリアを突破しており、需給が好転している局面です。"),
+                ("【真空地帯への突入】", "目立った戻り売り圧力が少なく、トレンドに逆らわない順張りが有効な水準です。"),
+                ("【売り手不在の快晴】", "上値での迷いが生じにくく、資金流入がストレートに株価に反映されやすい帯域にいます。"),
+                ("【需給良好・上値追い】", "過去の取引の壁を抜けました。ただし、急ピッチな上昇時は利食いにも留意してください。"),
+                ("【視界良好チャート】", "上値を抑えつける強固な壁が見当たりません。資金の逃げ足にだけ注意して波に乗りたい位置です。")
+            ]
         elif upside_potential >= 30:
             star_rating = "★★★★☆"
-            star_desc = f"激アツ（ターゲットまで +{upside_potential:.1f}%）"
-            base_logic = f"最も分厚い需給の壁（{int(max_vol_price)}円付近）まで大きな「のり代」があります."
+            patterns = [
+                ("【大幅な上値余地】", "強固な抵抗線まで距離があり、大きな値幅取りが狙えるポテンシャルを秘めています。"),
+                ("【上値余地：特大】", "最大の壁まで十分な空間が開いており、大口の仕掛けが入りやすいエリアです。"),
+                ("【リバウンド妙味】", "上値の重い水準まで距離があるため、反発トレンドに乗れた際のリターンが大きくなりやすい形状です。"),
+                ("【ターゲット遠方】", "主要なヤレヤレ売りが降ってくる水準まで、軽快な足取りが期待できます。"),
+                ("【絶好の上昇空間】", "次の大きな節目まで邪魔する壁がなく、買い圧力が素直に効きやすいチャートです。"),
+                ("【値幅取り推奨ゾーン】", "出来高の壁まで距離的余裕があり、トレンド発生時の爆発力に期待が持てる位置取りです。")
+            ]
         elif upside_potential >= 15:
             star_rating = "★★★☆☆"
-            star_desc = f"有望（次の壁まで +{upside_potential:.1f}%）"
-            base_logic = f"次の抵抗線（{int(max_vol_price)}円付近）まで堅実な上昇が見込める水準です."
+            patterns = [
+                ("【堅実な上値余地】", "次の抵抗帯まで適度な距離があり、セオリー通りの着実な上昇が見込めます。"),
+                ("【上値余地：中】", "極端な遠さではありませんが、壁に到達するまで十分に利益を狙える水準にあります。"),
+                ("【標準的なターゲット】", "最も分厚い出来高の壁に向けて、じわじわと水準を切り上げる展開が期待されます。"),
+                ("【ステップアップ局面】", "まずは直上の壁を目標に、資金の流入に伴って堅調に推移しやすい位置です。"),
+                ("【適度な空間】", "壁までの距離感として「ちょうど狙いやすい」位置取り。押し目があれば拾いたい形状です。"),
+                ("【トレンド追従推奨】", "上値抵抗までの道のりは見えており、無理のない範囲で波に乗るのが有効な局面です。")
+            ]
         elif upside_potential >= 5:
             star_rating = "★★☆☆☆"
-            star_desc = f"普通（次の壁まで +{upside_potential:.1f}%）"
-            base_logic = f"すぐ上に需給の壁（{int(max_vol_price)}円付近）が迫っています. 突破できるかの激戦区です."
+            patterns = [
+                ("【抵抗帯接近】", "すぐ上に出来高の壁が迫っています。ここを突破できるかが目先の最大の焦点となります。"),
+                ("【激戦区への突入】", "過去の取引が密集するエリアが間近です。売り買いが交錯しやすく、乱高下に注意が必要です。"),
+                ("【上値の壁テスト】", "分厚い壁へのアタック局面。跳ね返されるリスクも考慮し、打診買いから入りたい水準です。"),
+                ("【ブレイク前夜警戒】", "すぐ上の抵抗線を明確に上抜ければ景色が一変しますが、現状はまだ重い壁の下に位置しています。"),
+                ("【上値余地：小】", "ターゲットまでの距離が短く、ここから新規で大きな値幅を狙うにはややリスクが伴う位置です。"),
+                ("【壁打ち反落リスク】", "壁にぶつかって反落する「壁打ち」になりやすい位置。突破を確認してからの参戦でも遅くありません。")
+            ]
         else:
             star_rating = "★☆☆☆☆"
-            star_desc = f"頭打ち警戒（すぐ上に分厚い壁あり）"
-            base_logic = f"現在値のすぐ上（{int(max_vol_price)}円付近）に強烈な「しこり玉（含み損勢）」が大量に待機しています."
+            patterns = [
+                ("【頭打ち警戒】", "現在値のすぐ上に強烈なしこり玉が大量待機しており、上値が極めて重い状態です。"),
+                ("【岩盤到達・上値重し】", "過去最大の出来高を記録した価格帯に突入しています。大量の戻り売りを消化する莫大なパワーが必要です。"),
+                ("【ヤレヤレ売り集中エリア】", "「買値に戻ったら売ろう」と待っていた投資家の売りが降り注ぐ、最も苦しい価格帯です。"),
+                ("【上値抵抗MAX】", "需給面での障壁が一番高いエリアです。好材料などの強力なエンジンがない限り、突破は困難です。"),
+                ("【ブレイクアウト待ち推奨】", "この分厚い壁の中での勝負は分が悪いです。明確に上抜けて真空地帯に入るのを待つのが賢明です。"),
+                ("【撤退ラインの徹底】", "壁に跳ね返されて急落するリスクが高い水準です。保有している場合は利益確定も視野に入る位置と言えます。")
+            ]
+
+        # パターンの中からランダムで1つ選出
+        selected_pattern = random.choice(patterns)
+        star_desc = selected_pattern[0]
+        base_logic = selected_pattern[1]
 
         flavor_logic = ""
         if cap_category == "large":
-            flavor_logic = "時価総額が巨大なため『仕手筋の急騰仕掛け』は入りませんが、機関投資家や外国人投資家の資金流入をエンジンとした、強力で重厚なトレンドが期待できます."
+            flavor_logic = "時価総額が巨大なため『仕手筋の急騰仕掛け』は入りませんが、機関投資家や外国人投資家の資金流入をエンジンとした、強力で重厚なトレンドが期待できます。"
         elif cap_category == "target":
-            flavor_logic = "ハゲタカが最も好む規模感であり、彼らが資金を投下すれば一気に株価が吹き飛ぶ（または壁を突破する）ポテンシャルを秘めています."
+            flavor_logic = "ハゲタカが最も好む規模感であり、彼らが資金を投下すれば一気に株価が吹き飛ぶ（または壁を突破する）ポテンシャルを秘めています。"
         else:
-            flavor_logic = "※ただし時価総額が小さすぎるため、プロは資金を入れづらい銘柄です. 主に個人マネーによる『マネーゲーム（乱高下）』になりやすいため、ロットを落とした短期勝負に限定してください."
+            flavor_logic = "※ただし時価総額が小さすぎるため、プロは資金を入れづらい銘柄です。主に個人マネーによる『マネーゲーム（乱高下）』になりやすいため、ロットを落とした短期勝負に限定してください。"
 
-        star_logic = base_logic + " " + flavor_logic
+        star_logic = base_logic + "<br><br>" + flavor_logic
 
         past_1y = hist[-250:]
         year_high = past_1y['High'].max()
@@ -280,7 +313,6 @@ def evaluate_stock(ticker, mode="search"):
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません."
 
-        # 🎯 修正：ポテンシャルに基づく「ベースのランク」を決定
         base_rank = "D"
         if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): base_rank = "S"
         elif intervention_score >= 60: base_rank = "A"
@@ -289,10 +321,8 @@ def evaluate_stock(ticker, mode="search"):
 
         if current_price <= 300: base_rank = "E"
         
-        # 🎯 スキャン時の足切り判定（DやEランクのものは弾く）
         if mode == "scan" and base_rank in ["D", "E"]: return None
 
-        # 🎯 追加：乖離率20%以上の場合は警告テキストを生成
         warning_text = ""
         if deviation > 20:
             warning_text = "【注意】※安全性を要確認"
@@ -310,8 +340,8 @@ def evaluate_stock(ticker, mode="search"):
             "時価総額": market_cap_oku,
             "時価総額_表示": formatted_mcap,
             "dividend_text": dividend_text,
-            "ランク": base_rank,          # 🎯 追加：ベースのランク（S, A, B, C）
-            "警告": warning_text,         # 🎯 追加：警告メッセージ
+            "ランク": base_rank,
+            "警告": warning_text,
             "乖離率": deviation,
             "hist": hist,
             "max_vol_price": max_vol_price,
@@ -368,7 +398,7 @@ with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】"
     #### ① 🦅 介入度（％メーター）
     **「今、大口投資家がこの株を狙っている可能性」**を示します. (軽すぎず重すぎない規模、異常出来高、底値煮詰まり、急騰DNAから算出).
     
-    #### ② 🌟 お得度（★マーク）
+    #### ② 🌟 上値余地（★マーク）
     **「上値の需給の壁までどれくらい上昇する余地があるか」**を示します. 星が多いほど邪魔者がおらずスルスル上がりやすい「お宝状態」です.
     
     #### ③ 🚧 安全性（底値乖離）
@@ -402,13 +432,11 @@ with tab1:
                             with c1:
                                 st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
                                 
-                                # 🎯 修正：ベースランクの色分けと、警告文の結合表示
                                 base_rank = data['ランク']
                                 warning = data['警告']
                                 rank_color = "red" if base_rank == "S" else "orange" if base_rank == "A" else "blue"
                                 
                                 if warning:
-                                    # 警告がある場合は赤字で目立たせて結合
                                     rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank} <span style='color:#ff4b4b; font-size:0.8em;'>{warning}</span></h3>"
                                 else:
                                     rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank}</h3>"
@@ -437,7 +465,14 @@ with tab1:
                                 st.markdown("##### 📋 AI診断カルテ")
                                 
                                 st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
-                                with st.expander("💡 算出ロジックとAIの解説を見る"): st.info(data['star_logic'])
+                                
+                                # 🎯 修正：プルダウンを廃止し、デザインされたボックスで最初から表示
+                                st.markdown(f"""
+                                <div style="background-color: rgba(75, 139, 255, 0.08); padding: 15px; border-left: 5px solid #4b8bff; border-radius: 5px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.6;">
+                                {data['star_logic']}
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
                                 st.markdown("---")
                                 
                                 st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（高値掴みリスク）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
@@ -505,9 +540,8 @@ with tab2:
                 df['score'] = df['ランク'].map(rank_map).fillna(0)
                 df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
                 for index, row in df.iterrows():
-                    # 🎯 修正：スキャン結果のタイトルにも警告文を表示
-                    warning_display = f" {row['警告']}" if row['警告'] else ""
-                    with st.expander(f"【{row['ランク']}】{warning_display} {row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
-                        st.write(f"時価総額: **{row['時価総額_表示']}** | 配当: **{row['dividend_text']}** | {row['safe_judgment']}")
+                    warning_display = f" <span style='color:#ff4b4b; font-size:0.9em;'>{row['警告']}</span>" if row['警告'] else ""
+                    with st.expander(f"【{row['ランク']}】{row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%", expanded=False):
+                        st.markdown(f"**時価総額:** {row['時価総額_表示']} | **配当:** {row['dividend_text']} | {row['safe_judgment']}{warning_display}", unsafe_allow_html=True)
                         draw_chart(row)
             else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
