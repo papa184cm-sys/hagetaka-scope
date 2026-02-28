@@ -8,6 +8,7 @@ from datetime import datetime
 import unicodedata
 import requests
 import io
+import re
 
 # === ⚙️ ページ設定 ===
 st.set_page_config(
@@ -55,13 +56,23 @@ st.sidebar.markdown("""
 
 @st.cache_data(ttl=86400)
 def get_jpx_data():
+    """JPXのサイトから最新の銘柄一覧Excelを自動探索して取得する"""
     try:
-        url = "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
+        html_url = "https://www.jpx.co.jp/markets/statistics-equities/misc/01.html"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(html_url, headers=headers, timeout=10)
         response.raise_for_status()
         
-        df = pd.read_excel(io.BytesIO(response.content))
+        # HTML内から "data_j.xls" のリンクを正規表現で見つけ出す
+        match = re.search(r'href="([^"]+data_j\.xls)"', response.text)
+        if not match:
+            return {}, []
+            
+        file_url = "https://www.jpx.co.jp" + match.group(1)
+        xls_response = requests.get(file_url, headers=headers, timeout=10)
+        xls_response.raise_for_status()
+        
+        df = pd.read_excel(io.BytesIO(xls_response.content))
         df_tickers = df[df.iloc[:, 3].isin(['プライム', 'スタンダード', 'グロース'])]
         name_map = dict(zip(df_tickers.iloc[:, 1].astype(str), df_tickers.iloc[:, 2]))
         return name_map, list(name_map.keys())
@@ -86,6 +97,19 @@ def check_dna(hist):
         return max_spike >= 0.8
     except:
         return False
+
+def format_market_cap(oku_val):
+    """〇兆〇億円フォーマットに変換する関数"""
+    oku_val = int(oku_val)
+    if oku_val >= 10000:
+        cho = oku_val // 10000
+        oku = oku_val % 10000
+        if oku == 0:
+            return f"{cho}兆円"
+        else:
+            return f"{cho}兆{oku}億円"
+    else:
+        return f"{oku_val}億円"
 
 def evaluate_stock(ticker, mode="scan"):
     try:
@@ -117,6 +141,9 @@ def evaluate_stock(ticker, mode="scan"):
         shares = info.get('sharesOutstanding', 0)
         if market_cap == 0: market_cap = current_price * shares
         market_cap_oku = market_cap / 100000000
+        
+        # ★追加: 時価総額のフォーマット済みテキスト
+        formatted_mcap = format_market_cap(market_cap_oku)
 
         code_only = ticker.replace(".T", "")
         jp_name = jpx_names.get(code_only, info.get('longName', ticker))
@@ -241,6 +268,7 @@ def evaluate_stock(ticker, mode="scan"):
             "銘柄名": jp_name,
             "現在値": int(current_price),
             "時価総額": market_cap_oku,
+            "時価総額_表示": formatted_mcap,
             "ランク": total_rank,
             "乖離率": deviation,
             "ヒストリ": hist,
@@ -357,9 +385,20 @@ with tab1:
                             with c1:
                                 rank_color = "red" if data['ランク'] == "S" else "orange" if data['ランク'] == "A" else "blue"
                                 st.markdown(f"<h2 style='color:{rank_color};'>総合判定: {data['ランク']}</h2>", unsafe_allow_html=True)
+                                
+                                # 💡 総合判定の基準プルダウンを追加
+                                with st.expander("💡 総合判定の基準"):
+                                    st.caption("""
+                                    **【Sランク】** 大口介入度80%以上 ＋ お得度(上昇余地)30%以上
+                                    **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
+                                    **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
+                                    **【Cランク】** 上記以外の標準的な状態
+                                    **【注意】** 底値から20%以上上昇しており、高値掴み・利確売りに警戒
+                                    """)
+
                                 st.write(f"**{data['コード']} {data['銘柄名']}**")
                                 st.write(f"現在値: **{data['現在値']}** 円")
-                                st.write(f"時価総額: **{int(data['時価総額'])}** 億円")
+                                st.write(f"時価総額: **{data['時価総額_表示']}**")
                                 
                                 st.markdown("---")
                                 st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
@@ -398,7 +437,7 @@ with tab2:
         target_codes = [c for c in jpx_codes if c != "4052"] # 除外設定
         
         if not target_codes:
-            st.error("銘柄リストの取得に失敗しました。")
+            st.error("銘柄リストの取得に失敗しました。時間をおいて再度お試しください。")
         else:
             results = []
             progress_bar = st.progress(0)
@@ -424,7 +463,7 @@ with tab2:
 
                 for index, row in df.iterrows():
                     with st.expander(f"【{row['ランク']}】 {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
-                        st.write(f"時価総額: {int(row['時価総額'])}億 | 乖離率: {row['乖離率']:.1f}%")
+                        st.write(f"時価総額: **{row['時価総額_表示']}** | 乖離率: {row['乖離率']:.1f}%")
                         st.write(f"**お得度:** {row['star_rating']} {row['star_desc']}")
                         draw_chart(row)
             else:
