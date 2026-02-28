@@ -393,7 +393,7 @@ with tab1:
                                 st.caption(f"💡 AI解説: {data['safe_explain']}")
                                 st.markdown(f"**（底値からの乖離率: {data['乖離率']:.1f}%）**")
                                 
-                                # ここの表記漏れを修正して7段階すべて網羅しました
+                                # 完全な説明文付きで復元
                                 with st.expander("💡 安全性（底値乖離）の見方を見る"):
                                     safe_explain_html = f"""
                                     <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
@@ -401,12 +401,19 @@ with tab1:
                                     この底値から今の株価がどれだけ離れているか（乖離率%）を見て、高値掴みのリスクを判定します。<br><br>
                                     <strong>【AIの判定基準一覧】</strong><br>
                                     ・<strong>3.0%以内 【★ 絶好】</strong> 底値煮詰まり完了の可能性<br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>直近最安値からほぼ無乖離です。反発に向けてエネルギーが溜まっていると推測されます。</span><br>
                                     ・<strong>5.0%以内 【★ 有望】</strong> 勝負しやすいエントリー位置<br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>底値からの誤差範囲内であり、資金流入が始まれば上値を追いやすい状態と言えます。</span><br>
                                     ・<strong>10.0%以内 【✓ 及第点】</strong> トレンド発生の兆候あり<br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>調整を終え、再度上を目指す展開が期待できる状態です。</span><br>
                                     ・<strong>15.0%以内 【✓ 短期なら】</strong> スピード勝負の領域<br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>トレンドは発生中ですが、ここからは短期目線での対応が求められます。深追いは推奨しません。</span><br>
                                     ・<strong>20.0%以内 【⚠️ 限界範囲】</strong> 高値掴みに注意<br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>当ツールが一般的な勝負圏内と判断する目安の限界です。これ以上の価格追いはリスクが高まる傾向にあります。</span><br>
                                     ・<strong>30.0%以内 【❌ 警戒】</strong> 短期的な過熱感あり<br>
-                                    ・<strong>30.1%以上 【💀 高度な警戒】</strong> 上級者向けの過熱圏
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>すでに大きく動いており、大口の利益確定売りに押されるリスクが高まっています。</span><br>
+                                    ・<strong>30.1%以上 【💀 高度な警戒】</strong> 上級者向けの過熱圏<br>
+                                    　<span style='color: #dddddd; font-size: 0.85rem;'>短期的な高値掴みとなる可能性が高い水準です。新規参戦は極めて慎重に行う必要があり、上級者向けのタイミングと言えます。</span>
                                     </div>
                                     """
                                     st.markdown(safe_explain_html, unsafe_allow_html=True)
