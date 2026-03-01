@@ -109,6 +109,8 @@ def format_market_cap(oku_val):
     else:
         return f"{oku_val}億円"
 
+# 🎯 修正：15分間（900秒）データをキャッシュしてIPブロックを防ぐ＆爆速化
+@st.cache_data(ttl=900, show_spinner=False)
 def evaluate_stock(ticker):
     try:
         stock = yf.Ticker(ticker)
@@ -133,7 +135,6 @@ def evaluate_stock(ticker):
         else:
             turnover_rate = 0
             
-        # 🎯 コンプライアンス修正：大口介入期待高に変更
         if turnover_rate >= 10.0:
             turnover_str = f"🔥🔥🔥 {turnover_rate:.2f}% (超異常値・大相場警戒)"
         elif turnover_rate >= 5.0:
@@ -303,7 +304,6 @@ def evaluate_stock(ticker):
         is_platinum = 500 <= market_cap_oku <= 2000
         is_magma = vol_ratio >= 1.5
 
-        # 🎯 コンプライアンス修正：動的なAI解説テキストもマイルドに統一
         safe_judgment = ""
         safe_explain = ""
         if deviation <= -5.0:
@@ -451,7 +451,12 @@ with st.form(key='search_form'):
 
 if search_btn and input_code:
     codes = normalize_input(input_code)
-    if not codes: st.error("銘柄コードを入力してください")
+    
+    # 🎯 修正：入力された銘柄が5つを超えていないかチェック
+    if not codes: 
+        st.error("銘柄コードを入力してください")
+    elif len(codes) > 5:
+        st.error("⚠️ サーバー負荷軽減のため、一度に診断できるのは最大5銘柄までです。銘柄数を減らして再度お試しください。")
     else:
         with st.spinner(f'🦅 {len(codes)}銘柄を精密検査中...'):
             for code in codes:
@@ -489,7 +494,6 @@ if search_btn and input_code:
                             st.write(f"配当情報: **{data['dividend_text']}**")
                             st.write(f"商い熱量: **{data['turnover_str']}**")
                             
-                            # 🎯 コンプライアンス修正：商い熱量の解説テキスト変更
                             with st.expander("💡 商い熱量（株式回転率）とは？"):
                                 st.markdown("""
                                 **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
@@ -497,7 +501,7 @@ if search_btn and input_code:
                                 
                                 * **① 「本物の大口」か「ノイズ」かの見極め**
                                   前日比で出来高が3倍に増えていても、それが発行済株数の「0.1%」に過ぎなければ、単なる個人の小競り合いに過ぎません。しかし、1日で「5%」や「10%」が取引されていたら、それは巨大な資金が明確に介入し、株主構成が変わるほどの「大相場」の初動（または終焉）の可能性を示唆します。
-                                * **② 「浮動株」の買い占め（主の住み着き）察知**
+                                * **② 「浮フラ株」の買い占め（主の住み着き）察知**
                                   発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
                                 * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
                                   上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
@@ -532,7 +536,6 @@ if search_btn and input_code:
                             st.markdown(f"<div style='color: {'#ff4b4b' if data['乖離率'] > 10 else '#4b8bff'}; background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
                             st.markdown(f"**（判定: {data['safe_judgment']}）**")
                             
-                            # 🎯 コンプライアンス修正：安全性の解説テキスト変更
                             with st.expander("💡 安全性（壁からの乖離と撤退ライン）の見方を見る"):
                                 safe_explain_html = f"""
                                 <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
