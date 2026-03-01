@@ -407,9 +407,22 @@ def draw_chart(row):
                   annotation_position="bottom right", annotation_font_color="cyan", row=1, col=1)
     fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", row=1, col=2)
 
-    fig.update_layout(title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高", xaxis_rangeslider_visible=False, height=350, margin=dict(l=0, r=0, t=30, b=0))
+    # 🎯 修正：チャートのドラッグ操作（パン・ズーム）を無効化し、固定化
+    fig.update_layout(
+        title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高", 
+        xaxis_rangeslider_visible=False, 
+        height=350, 
+        margin=dict(l=0, r=0, t=30, b=0),
+        dragmode=False # これによりスワイプしても画面自体がスクロールするようになります
+    )
+    
+    # 🎯 修正：X軸・Y軸の拡大縮小を完全に固定
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     fig.update_xaxes(showticklabels=False, row=1, col=2)
-    st.plotly_chart(fig, use_container_width=True)
+    
+    # 🎯 修正：右上のゴチャゴチャしたツールバー（モードバー）を非表示
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # === 🖥️ メイン画面 ===
 st.title("🦅 源太AI・ハゲタカscope")
