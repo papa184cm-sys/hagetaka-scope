@@ -167,12 +167,13 @@ def evaluate_stock(ticker):
             except:
                 jp_name = info.get('longName', ticker)
 
+        # 🎯 修正：断定を避けた名称に変更
         if market_cap_oku >= 5000:
             cap_category = "large"
-            intervention_name = "🏢 機関投資家・大口流入度"
+            intervention_name = "🏢 機関投資家・大口流入期待度"
         elif market_cap_oku >= 50:
             cap_category = "target"
-            intervention_name = "🦅 ハゲタカ介入度"
+            intervention_name = "🦅 ハゲタカ介入期待度"
         else:
             cap_category = "small"
             intervention_name = "⚠️ イナゴマネー過熱度 (超小型)"
@@ -328,7 +329,9 @@ def evaluate_stock(ticker):
         if position_score <= 0.2: intervention_score += 15
         if has_dna: intervention_score += 10
         
+        # 🎯 修正：スコアを10%から90%の間にキャップ（制限）
         intervention_score = int(round(min(intervention_score, 100) / 10.0)) * 10
+        intervention_score = max(10, min(intervention_score, 90))
         
         intervention_comment = ""
         if intervention_score >= 80:
@@ -407,34 +410,32 @@ def draw_chart(row):
                   annotation_position="bottom right", annotation_font_color="cyan", row=1, col=1)
     fig.add_hline(y=recent_20_low, line_width=1.5, line_dash="dot", line_color="cyan", row=1, col=2)
 
-    # 🎯 修正：チャートのドラッグ操作（パン・ズーム）を無効化し、固定化
     fig.update_layout(
         title=f"{row['銘柄名']} 日足 ＆ 価格帯別出来高", 
         xaxis_rangeslider_visible=False, 
         height=350, 
         margin=dict(l=0, r=0, t=30, b=0),
-        dragmode=False # これによりスワイプしても画面自体がスクロールするようになります
+        dragmode=False
     )
     
-    # 🎯 修正：X軸・Y軸の拡大縮小を完全に固定
     fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(fixedrange=True)
     fig.update_xaxes(showticklabels=False, row=1, col=2)
     
-    # 🎯 修正：右上のゴチャゴチャしたツールバー（モードバー）を非表示
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # === 🖥️ メイン画面 ===
 st.title("🦅 源太AI・ハゲタカscope")
 st.caption("Pro Version: 2026.02 | Target: VIP Members")
 
+# 🎯 修正：各項目の見方と算出ロジックのテキスト変更
 with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】"):
     st.markdown("""
-    #### ① 🦅 介入度（％メーター）
+    #### ① 🦅 介入期待度（％メーター）
     **「今、大口投資家がこの株を狙っている可能性」**を示します. (軽すぎず重すぎない規模、異常出来高、底値煮詰まり、急騰DNAから算出).
     
-    #### ② 🌟 上値余地（★マーク）
-    **「上値の需給の壁までどれくらい上昇する余地があるか」**を示します. 星が多いほど邪魔者がおらずスルスル上がりやすい「お宝状態」です.
+    #### ② 🌟 上値の需給の壁までの余地（★マーク）
+    **「上値の需給の壁までどれくらい上昇する余地があるか」**を示します. 星が多いほど邪魔者がおらずスルスル上がりやすい「お宝状態」と言えます.
     
     #### ③ 🚧 安全性（壁からの乖離と撤退ライン）
     **「現在値が『最大の需給の壁』から何%離れているか」**を示します. マイナス圏は壁の下にある「割安圏」であり、直近底値（青の点線）を絶対の撤退ラインとして勝負できる優位性の高いポイントです.
@@ -475,10 +476,11 @@ if search_btn and input_code:
                             
                             st.markdown(rank_html, unsafe_allow_html=True)
                             
+                            # 🎯 修正：総合判定の基準のテキスト変更
                             with st.expander("💡 総合判定の基準を見る"):
                                 st.markdown("""
-                                * **【Sランク】** 大口介入度80%以上 ＋ お得度(上昇余地)30%以上
-                                * **【Aランク】** 大口介入度60%以上（資金流入のサイン点灯）
+                                * **【Sランク】** 大口介入期待度80%以上 ＋ 上昇期待値(上昇余地)30%以上
+                                * **【Aランク】** 大口介入期待度60%以上（資金流入のサイン点灯）
                                 * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
                                 * **【Cランク】** 上記以外の標準的な状態
                                 * **【注意】** 需給の壁から20%以上乖離している場合、安全面のアラートが表示されます
