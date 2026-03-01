@@ -111,9 +111,21 @@ def format_market_cap(oku_val):
 
 # 🎯 修正：15分間（900秒）データをキャッシュしてIPブロックを防ぐ＆爆速化
 @st.cache_data(ttl=900, show_spinner=False)
-def evaluate_stock(ticker):
+def evaluate_stock(ticker, mode="search"):
     try:
         stock = yf.Ticker(ticker)
+
+        if mode == "scan":
+            try:
+                fast = stock.fast_info
+                last_price = getattr(fast, 'last_price', None)
+                if last_price and last_price <= 300: return None
+                mcap = getattr(fast, 'market_cap', None)
+                if mcap:
+                    mcap_oku = mcap / 100000000
+                    if mcap_oku < 50 or mcap_oku > 10000: return None
+            except:
+                pass
 
         hist = stock.history(period="2y")
         if len(hist) < 30: return None
@@ -168,6 +180,8 @@ def evaluate_stock(ticker):
                 else: jp_name = info.get('longName', ticker)
             except:
                 jp_name = info.get('longName', ticker)
+
+        if current_price <= 300 and mode == "scan": return None
 
         if market_cap_oku >= 5000:
             cap_category = "large"
@@ -306,6 +320,8 @@ def evaluate_stock(ticker):
 
         safe_judgment = ""
         safe_explain = ""
+        safe_deviation = (current_price - recent_20_low) / recent_20_low * 100
+        
         if deviation <= -5.0:
             safe_judgment = "📉 割安：底値仕込みが適切とされるゾーン（任意）"
             safe_explain = "現在値が需給の壁より下に位置する「割安圏」です。直近底値（青の点線）を割ったら撤退というルールで、安値で仕込めるチャンスと言えます。"
@@ -341,14 +357,19 @@ def evaluate_stock(ticker):
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません."
 
-        base_rank = "D"
-        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): base_rank = "S"
-        elif intervention_score >= 60: base_rank = "A"
-        elif is_platinum and position_score <= 0.3: base_rank = "B"
-        else: base_rank = "C"
+        # 🎯 修正: Bランクがしっかり出るように条件を「底値圏（下から40%以内）」に調整
+        base_rank = "C"
+        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): 
+            base_rank = "S"
+        elif intervention_score >= 60: 
+            base_rank = "A"
+        elif is_platinum and position_score <= 0.4: 
+            base_rank = "B"
+        else: 
+            base_rank = "C"
 
         warning_text = ""
-        if deviation > 20:
+        if safe_deviation > 20:
             warning_text = "【注意】※安全性を要確認"
 
         icons_list = []
@@ -444,50 +465,52 @@ with st.expander("🔰 【源太AI・各項目の見方と算出ロジック】"
     <span style='color: #ffaa00; font-weight: bold;'>⚠️注意: オレンジの線を下回った場合は、含み損を抱えた投資家の「パニック売り（投げ売り）」が出やすくなるため、割ってはならない『下値支持線』としての目安にもなります。</span>
     """, unsafe_allow_html=True)
 
-st.markdown("##### 気になる銘柄を入力（スペース区切りで複数可）")
-with st.form(key='search_form'):
-    input_code = st.text_area("銘柄コード", height=68, placeholder="例: 7011 7203 9984")
-    search_btn = st.form_submit_button("🦅 ハゲタカAIで診断する")
+tab1, tab2 = st.tabs(["🔍 複数銘柄一括診断", "🦅 全市場スキャン"])
 
-if search_btn and input_code:
-    codes = normalize_input(input_code)
-    
-    # 🎯 修正：入力された銘柄が5つを超えていないかチェック
-    if not codes: 
-        st.error("銘柄コードを入力してください")
-    elif len(codes) > 5:
-        st.error("⚠️ サーバー負荷軽減のため、一度に診断できるのは最大5銘柄までです。銘柄数を減らして再度お試しください。")
-    else:
-        with st.spinner(f'🦅 {len(codes)}銘柄を精密検査中...'):
-            for code in codes:
-                if not code.isdigit(): continue
-                data = evaluate_stock(f"{code}.T")
-                if data:
-                    with st.container():
-                        st.markdown("---")
-                        c1, c2 = st.columns([1, 2])
-                        with c1:
-                            st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
-                            
-                            base_rank = data['ランク']
-                            warning = data['警告']
-                            rank_color = "red" if base_rank == "S" else "orange" if base_rank == "A" else "blue"
-                            
-                            if warning:
-                                rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank} <span style='color:#ff4b4b; font-size:0.8em;'>{warning}</span></h3>"
-                            else:
-                                rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank}</h3>"
-                            
-                            st.markdown(rank_html, unsafe_allow_html=True)
-                            
-                            with st.expander("💡 総合判定の基準を見る"):
-                                st.markdown("""
-                                * **【Sランク】** 大口介入期待度80%以上 ＋ 上昇期待値(上昇余地)30%以上
-                                * **【Aランク】** 大口介入期待度60%以上（資金流入のサイン点灯）
-                                * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
-                                * **【Cランク】** 上記以外の標準的な状態
-                                * **【注意】** 需給の壁から20%以上乖離している場合、安全面のアラートが表示されます
-                                """)
+with tab1:
+    st.markdown("##### 気になる銘柄を入力（スペース区切りで複数可）")
+    with st.form(key='search_form'):
+        input_code = st.text_area("銘柄コード", height=68, placeholder="例: 7011 7203 9984")
+        search_btn = st.form_submit_button("🦅 ハゲタカAIで診断する")
+
+    if search_btn and input_code:
+        codes = normalize_input(input_code)
+        
+        if not codes: 
+            st.error("銘柄コードを入力してください")
+        elif len(codes) > 5:
+            st.error("⚠️ サーバー負荷軽減のため、一度に診断できるのは最大5銘柄までです。銘柄数を減らして再度お試しください。")
+        else:
+            with st.spinner(f'🦅 {len(codes)}銘柄を精密検査中...'):
+                for code in codes:
+                    if not code.isdigit(): continue
+                    data = evaluate_stock(f"{code}.T")
+                    if data:
+                        with st.container():
+                            st.markdown("---")
+                            c1, c2 = st.columns([1, 2])
+                            with c1:
+                                st.markdown(f"<h2 style='margin-bottom: 0px;'>{data['icons_str']} {data['コード']} {data['銘柄名']}</h2>", unsafe_allow_html=True)
+                                
+                                base_rank = data['ランク']
+                                warning = data['警告']
+                                rank_color = "red" if base_rank == "S" else "orange" if base_rank == "A" else "#FFD700" if base_rank == "B" else "blue"
+                                
+                                if warning:
+                                    rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank} <span style='color:#ff4b4b; font-size:0.8em;'>{warning}</span></h3>"
+                                else:
+                                    rank_html = f"<h3 style='color:{rank_color}; margin-top: 5px;'>総合判定: {base_rank}</h3>"
+                                
+                                st.markdown(rank_html, unsafe_allow_html=True)
+                                
+                                with st.expander("💡 総合判定の基準を見る"):
+                                    st.markdown("""
+                                    * **【Sランク】** 大口介入期待度80%以上 ＋ 上昇期待値(上昇余地)30%以上
+                                    * **【Aランク】** 大口介入期待度60%以上（資金流入のサイン点灯）
+                                    * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
+                                    * **【Cランク】** 上記以外の標準的な状態
+                                    * **【注意】** 底値から20%以上乖離している場合、高値掴み警戒のアラートが表示されます
+                                    """)
 
                             st.write(f"現在値: **{data['現在値']}** 円")
                             st.write(f"時価総額: **{data['時価総額_表示']}**")
@@ -559,3 +582,41 @@ if search_btn and input_code:
 
                         draw_chart(data)
                 else: st.error(f"❌ {code}: データ取得エラー")
+
+with tab2:
+    st.markdown("##### ハゲタカが潜む銘柄を自動抽出します")
+    
+    st.markdown("""
+    <div style='display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;'>
+        <div style='background-color: rgba(0, 150, 255, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>💎 プラチナ (黄金サイズ)</div>
+        <div style='background-color: rgba(255, 100, 0, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>🦅 ハゲタカ参戦？ (仕込み疑惑)</div>
+        <div style='background-color: rgba(100, 255, 0, 0.1); padding: 5px 10px; border-radius: 15px; font-size: 0.85rem;'>🧬 DNA (習性) (過去の急騰)</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🚀 スキャン開始", key="scan_btn"):
+        st.warning("スキャン中です... ブラウザを閉じないでください...")
+        target_codes = [c for c in jpx_codes if c != "4052"]
+        if not target_codes: st.error("銘柄リストの取得に失敗しました。時間をおいて再度お試しください。")
+        else:
+            results = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            total = len(target_codes)
+            for i, code in enumerate(target_codes):
+                status_text.text(f"スキャン中... {i+1} / {total} 銘柄完了")
+                data = evaluate_stock(f"{code}.T", mode="scan")
+                if data: results.append(data)
+                progress_bar.progress((i + 1) / total)
+            status_text.text(f"スキャン完了！ 有望な {len(results)} 銘柄を発見しました。")
+            
+            if results:
+                df = pd.DataFrame(results)
+                rank_map = {"S": 5, "A": 4, "B": 3, "注意": 2, "C": 1}
+                df['score'] = df['ランク'].map(rank_map).fillna(0)
+                df = df.sort_values(by=['score', 'intervention_score'], ascending=[False, False])
+                for index, row in df.iterrows():
+                    with st.expander(f"【{row['ランク']}】 {row['icons_str']} {row['コード']} {row['銘柄名']} | {row['intervention_name']}: {row['intervention_score']}%"):
+                        st.write(f"時価総額: **{row['時価総額_表示']}** | {row['safe_judgment']}")
+                        draw_chart(row)
+            else: st.warning("条件に合致するお宝銘柄は発見されませんでした。")
