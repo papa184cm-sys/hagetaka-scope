@@ -109,7 +109,6 @@ def format_market_cap(oku_val):
     else:
         return f"{oku_val}億円"
 
-# 🎯 修正：15分間（900秒）データをキャッシュしてIPブロックを防ぐ＆爆速化
 @st.cache_data(ttl=900, show_spinner=False)
 def evaluate_stock(ticker):
     try:
@@ -341,11 +340,16 @@ def evaluate_stock(ticker):
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません."
 
+        # === 🎯 ランク判定ロジックの修正 ===
         base_rank = "D"
-        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): base_rank = "S"
-        elif intervention_score >= 60: base_rank = "A"
-        elif is_platinum and position_score <= 0.3: base_rank = "B"
-        else: base_rank = "C"
+        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30):
+            base_rank = "S"
+        elif intervention_score >= 70: # A判定を60→70に厳格化
+            base_rank = "A"
+        elif intervention_score >= 50 or (is_platinum and position_score <= 0.5): # B判定を大幅に広げる（スコア50以上 or プラチナで半値以下の位置）
+            base_rank = "B"
+        else:
+            base_rank = "C"
 
         warning_text = ""
         if deviation > 20:
@@ -452,7 +456,6 @@ with st.form(key='search_form'):
 if search_btn and input_code:
     codes = normalize_input(input_code)
     
-    # 🎯 修正：入力された銘柄が5つを超えていないかチェック
     if not codes: 
         st.error("銘柄コードを入力してください")
     elif len(codes) > 5:
@@ -483,8 +486,8 @@ if search_btn and input_code:
                             with st.expander("💡 総合判定の基準を見る"):
                                 st.markdown("""
                                 * **【Sランク】** 大口介入期待度80%以上 ＋ 上昇期待値(上昇余地)30%以上
-                                * **【Aランク】** 大口介入期待度60%以上（資金流入のサイン点灯）
-                                * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
+                                * **【Aランク】** 大口介入期待度70%以上（資金流入の強いサイン点灯）
+                                * **【Bランク】** 大口介入期待度50%以上、または プラチナサイズ(500〜2000億) ＋ 底値圏(50%以下)で煮詰まり
                                 * **【Cランク】** 上記以外の標準的な状態
                                 * **【注意】** 需給の壁から20%以上乖離している場合、安全面のアラートが表示されます
                                 """)
