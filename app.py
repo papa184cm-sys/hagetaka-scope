@@ -109,6 +109,7 @@ def format_market_cap(oku_val):
     else:
         return f"{oku_val}億円"
 
+# 🎯 修正：15分間（900秒）データをキャッシュしてIPブロックを防ぐ＆爆速化
 @st.cache_data(ttl=900, show_spinner=False)
 def evaluate_stock(ticker):
     try:
@@ -293,8 +294,6 @@ def evaluate_stock(ticker):
         past_1y = hist[-250:]
         year_high = past_1y['High'].max()
         year_low = past_1y['Low'].min()
-        
-        # 過去1年間の高安のどの位置にいるか（0に近いほど底値圏）
         position_score = 0.5
         if year_high != year_low:
             position_score = (current_price - year_low) / (year_high - year_low)
@@ -305,11 +304,8 @@ def evaluate_stock(ticker):
         is_platinum = 500 <= market_cap_oku <= 2000
         is_magma = vol_ratio >= 1.5
 
-        # --- 安全性判定 ---
         safe_judgment = ""
         safe_explain = ""
-        safe_deviation = (current_price - recent_20_low) / recent_20_low * 100
-        
         if deviation <= -5.0:
             safe_judgment = "📉 割安：底値仕込みが適切とされるゾーン（任意）"
             safe_explain = "現在値が需給の壁より下に位置する「割安圏」です。直近底値（青の点線）を割ったら撤退というルールで、安値で仕込めるチャンスと言えます。"
@@ -326,14 +322,11 @@ def evaluate_stock(ticker):
             safe_judgment = "💀 高度な警戒：高値掴みリスク大"
             safe_explain = "壁から完全に乖離した超高値圏です。今から飛び乗るのは極めて危険で、上級者でも難しいゾーンのため注意必須です。"
 
-        # --- 介入度スコアの計算 ---
         intervention_score = 0
         if is_platinum: intervention_score += 35
         elif 100 <= market_cap_oku <= 5000: intervention_score += 15
-        
         if vol_ratio >= 3.0: intervention_score += 40
         elif vol_ratio >= 1.5: intervention_score += 25
-        
         if position_score <= 0.2: intervention_score += 15
         if has_dna: intervention_score += 10
         
@@ -348,23 +341,15 @@ def evaluate_stock(ticker):
         else:
             intervention_comment = "💤 【静観】現在は目立った大口の動きは検出されません."
 
-        # ========================================================
-        # 🚨 修正箇所：Bランク判定を完全復活させました！
-        # ========================================================
-        base_rank = "C"
-        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): 
-            base_rank = "S"
-        elif intervention_score >= 60: 
-            base_rank = "A"
-        elif safe_deviation > 20: 
-            base_rank = "注意"
-        elif is_platinum and position_score <= 0.3: 
-            base_rank = "B" # ← これが抜けていました！
-        # ========================================================
+        base_rank = "D"
+        if intervention_score >= 80 and (is_blue_sky or upside_potential >= 30): base_rank = "S"
+        elif intervention_score >= 60: base_rank = "A"
+        elif is_platinum and position_score <= 0.3: base_rank = "B"
+        else: base_rank = "C"
 
         warning_text = ""
-        if safe_deviation > 20:
-            warning_text = "【注意】※高値圏のため安全性を要確認"
+        if deviation > 20:
+            warning_text = "【注意】※安全性を要確認"
 
         icons_list = []
         if has_dna: icons_list.append("🧬")
@@ -382,8 +367,7 @@ def evaluate_stock(ticker):
             "turnover_str": turnover_str,
             "ランク": base_rank,
             "警告": warning_text,
-            "乖離率": deviation,  # 壁からの乖離率
-            "safe_deviation": safe_deviation, # 底値からの乖離率（内部用）
+            "乖離率": deviation,
             "hist": hist,
             "max_vol_price": max_vol_price,
             "recent_20_low": recent_20_low,
@@ -468,6 +452,7 @@ with st.form(key='search_form'):
 if search_btn and input_code:
     codes = normalize_input(input_code)
     
+    # 🎯 修正：入力された銘柄が5つを超えていないかチェック
     if not codes: 
         st.error("銘柄コードを入力してください")
     elif len(codes) > 5:
@@ -501,76 +486,76 @@ if search_btn and input_code:
                                 * **【Aランク】** 大口介入期待度60%以上（資金流入のサイン点灯）
                                 * **【Bランク】** プラチナサイズ(500〜2000億) ＋ 底値圏で煮詰まり
                                 * **【Cランク】** 上記以外の標準的な状態
-                                * **【注意】** 底値から20%以上乖離している場合、高値掴み警戒のアラートが表示されます
+                                * **【注意】** 需給の壁から20%以上乖離している場合、安全面のアラートが表示されます
                                 """)
 
-                        st.write(f"現在値: **{data['現在値']}** 円")
-                        st.write(f"時価総額: **{data['時価総額_表示']}**")
-                        st.write(f"配当情報: **{data['dividend_text']}**")
-                        st.write(f"商い熱量: **{data['turnover_str']}**")
-                        
-                        with st.expander("💡 商い熱量（株式回転率）とは？"):
-                            st.markdown("""
-                            **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
-                            この数値は「本物の大口（ハゲタカ）」の介入や、株価が動く「本当のエネルギー」を見極めるための最重要シグナルのひとつです。
+                            st.write(f"現在値: **{data['現在値']}** 円")
+                            st.write(f"時価総額: **{data['時価総額_表示']}**")
+                            st.write(f"配当情報: **{data['dividend_text']}**")
+                            st.write(f"商い熱量: **{data['turnover_str']}**")
                             
-                            * **① 「本物の大口」か「ノイズ」かの見極め**
-                              前日比で出来高が3倍に増えていても、それが発行済株数の「0.1%」に過ぎなければ、単なる個人の小競り合いに過ぎません。しかし、1日で「5%」や「10%」が取引されていたら、それは巨大な資金が明確に介入し、株主構成が変わるほどの「大相場」の初動（または終焉）の可能性を示唆します。
-                            * **② 「浮フラ株」の買い占め（主の住み着き）察知**
-                              発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
-                            * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
-                              上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
-                              
-                            ---
-                            **【AIの判定基準目安】**
-                            * **1%未満 【💤 平常運転】**：通常の商いです。まずは静観が基本となります。
-                            * **2%以上 【🔥 動意づき】**：やや熱を帯びてきました。水面下で資金が動き始めている可能性があります。
-                            * **5%以上 【🔥🔥 異常値・大口介入期待高】**：明確な大口資金の介入や、大相場へ発展する可能性を秘めた激アツ水準です。
-                            * **10%以上 【🔥🔥🔥 超異常値・大相場警戒】**：極めて稀な熱量です。「セリングクライマックス（大暴落の底）」か「バイイングクライマックス（大天井）」の可能性があり、相場の転換点となるケースが多いため警戒と注視が必要です。
-                            """)
-                        
-                        st.markdown("---")
-                        st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
-                        st.progress(data['intervention_score'] / 100.0)
-                        st.markdown(f"**{data['intervention_comment']}**")
-                        
-                    with c2:
-                        st.markdown("##### 📋 AI診断カルテ")
-                        
-                        st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
-                        
-                        st.markdown(f"""
-                        <div style="background-color: rgba(75, 139, 255, 0.08); padding: 15px; border-left: 5px solid #4b8bff; border-radius: 5px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.6;">
-                        {data['star_logic']}
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        st.markdown("---")
-                        
-                        st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（需給の壁からの乖離率）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
-                        st.markdown(f"<div style='color: {'#ff4b4b' if data['乖離率'] > 10 else '#4b8bff'}; background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
-                        st.markdown(f"**（判定: {data['safe_judgment']}）**")
-                        
-                        with st.expander("💡 安全性（壁からの乖離と撤退ライン）の見方を見る"):
-                            safe_explain_html = f"""
-                            <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
-                            当ツールでは、安全性を<strong>「最大の需給の壁（オレンジの点線）」からの乖離率（％）</strong>で判定するように進化しました。<br>
-                            マイナス圏（壁より下）は過去のしこり玉を恐れて一般投資家が手を出せない「割安圏」であり、ハゲタカが水面下で仕込む絶好のポイントです。<br><br>
-                            <span style='color: #4b8bff; font-weight: bold;'>【🛡️プロの撤退ルール】マイナス圏で仕込む場合は、直近の底値（青の点線）を下回ったら「シナリオ崩れ」として潔く撤退（損切り）することで、大怪我を防ぐことができます。</span><br><br>
-                            <strong>【AIの判定基準一覧】</strong><br>
-                            ・<strong>-5.0%以下 【📉 割安】</strong> 底値仕込みが適切とされるゾーン（任意）<br>
-                            　<span style='color: #dddddd; font-size: 0.85rem;'>壁の下に潜伏中。直近底値割れを撤退ラインとし、安値で仕込めるチャンスと言えます。</span><br>
-                            ・<strong>0.0%以下 【⚔️ 激戦】</strong> ブレイク前夜期待<br>
-                            　<span style='color: #dddddd; font-size: 0.85rem;'>壁へのアタック目前。ここを抜ければ一気に青空が広がる激戦区と位置付けられます。</span><br>
-                            ・<strong>+10.0%以内 【🚀 安全圏】</strong> トレンド初動かも！？<br>
-                            　<span style='color: #dddddd; font-size: 0.85rem;'>壁の突破を完了！最も素直に上昇の波に乗りやすいベストタイミングになりやすい。</span><br>
-                            ・<strong>+20.0%以内 【⚠️ 警戒】</strong> 短期過熱気味警戒レベル<br>
-                            　<span style='color: #dddddd; font-size: 0.85rem;'>壁から少し離れすぎました。壁付近までの「押し目（下落）」を待つのが無難です。</span><br>
-                            ・<strong>+20.1%以上 【💀 高度な警戒】</strong> 高値掴みリスク大<br>
-                            　<span style='color: #dddddd; font-size: 0.85rem;'>壁から完全に乖離した超高値圏。今から飛び乗るのは極めて危険です。上級者でも難しいゾーンのため注意必須。</span>
+                            with st.expander("💡 商い熱量（株式回転率）とは？"):
+                                st.markdown("""
+                                **商い熱量 ＝ 出来高が総発行株数の何％にあたるか（株式回転率・商い率）**
+                                この数値は「本物の大口（ハゲタカ）」の介入や、株価が動く「本当のエネルギー」を見極めるための最重要シグナルのひとつです。
+                                
+                                * **① 「本物の大口」か「ノイズ」かの見極め**
+                                  前日比で出来高が3倍に増えていても、それが発行済株数の「0.1%」に過ぎなければ、単なる個人の小競り合いに過ぎません。しかし、1日で「5%」や「10%」が取引されていたら、それは巨大な資金が明確に介入し、株主構成が変わるほどの「大相場」の初動（または終焉）の可能性を示唆します。
+                                * **② 「浮フラ株」の買い占め（主の住み着き）察知**
+                                  発行済株数の中には、親会社などが保有し市場に出回らない「固定株」が多数あります。つまり、発行済株数の5%の出来高があったということは、実際に市場に出回っている株（浮動株）の15%〜20%近くがたった1日で入れ替わった計算になります。これこそが、銘柄に「主（ぬし）」が住み着いた瞬間の熱量と言えます。
+                                * **③ 需給の壁（しこり玉）を突破するエネルギー判定**
+                                  上値に分厚い壁（含み損の売り圧力）があったとしても、この商い熱量が異常に高ければ、「ヤレヤレ売りを全部買いのめしてでも上に持っていく」という新勢力の強大なパワーの裏付けとなります。
+                                  
+                                ---
+                                **【AIの判定基準目安】**
+                                * **1%未満 【💤 平常運転】**：通常の商いです。まずは静観が基本となります。
+                                * **2%以上 【🔥 動意づき】**：やや熱を帯びてきました。水面下で資金が動き始めている可能性があります。
+                                * **5%以上 【🔥🔥 異常値・大口介入期待高】**：明確な大口資金の介入や、大相場へ発展する可能性を秘めた激アツ水準です。
+                                * **10%以上 【🔥🔥🔥 超異常値・大相場警戒】**：極めて稀な熱量です。「セリングクライマックス（大暴落の底）」か「バイイングクライマックス（大天井）」の可能性があり、相場の転換点となるケースが多いため警戒と注視が必要です。
+                                """)
+                            
+                            st.markdown("---")
+                            st.markdown(f"### {data['intervention_name']}: {data['intervention_score']}%")
+                            st.progress(data['intervention_score'] / 100.0)
+                            st.markdown(f"**{data['intervention_comment']}**")
+                            
+                        with c2:
+                            st.markdown("##### 📋 AI診断カルテ")
+                            
+                            st.markdown(f"#### {data['star_rating']} {data['star_desc']}")
+                            
+                            st.markdown(f"""
+                            <div style="background-color: rgba(75, 139, 255, 0.08); padding: 15px; border-left: 5px solid #4b8bff; border-radius: 5px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.6;">
+                            {data['star_logic']}
                             </div>
-                            """
-                            st.markdown(safe_explain_html, unsafe_allow_html=True)
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown("---")
+                            
+                            st.markdown(f"<h3 style='font-size: 1.2rem; font-weight: bold;'>🛡️ 安全性（需給の壁からの乖離率）: {data['乖離率']:.1f}%</h3>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='color: {'#ff4b4b' if data['乖離率'] > 10 else '#4b8bff'}; background-color: rgba(255, 255, 255, 0.05); padding: 10px; border-radius: 5px;'><strong>💡 AI解説:</strong> {data['safe_explain']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"**（判定: {data['safe_judgment']}）**")
+                            
+                            with st.expander("💡 安全性（壁からの乖離と撤退ライン）の見方を見る"):
+                                safe_explain_html = f"""
+                                <div style='color: white; font-size: 0.95rem; line-height: 1.6;'>
+                                当ツールでは、安全性を<strong>「最大の需給の壁（オレンジの点線）」からの乖離率（％）</strong>で判定するように進化しました。<br>
+                                マイナス圏（壁より下）は過去のしこり玉を恐れて一般投資家が手を出せない「割安圏」であり、ハゲタカが水面下で仕込む絶好のポイントです。<br><br>
+                                <span style='color: #4b8bff; font-weight: bold;'>【🛡️プロの撤退ルール】マイナス圏で仕込む場合は、直近の底値（青の点線）を下回ったら「シナリオ崩れ」として潔く撤退（損切り）することで、大怪我を防ぐことができます。</span><br><br>
+                                <strong>【AIの判定基準一覧】</strong><br>
+                                ・<strong>-5.0%以下 【📉 割安】</strong> 底値仕込みが適切とされるゾーン（任意）<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁の下に潜伏中。直近底値割れを撤退ラインとし、安値で仕込めるチャンスと言えます。</span><br>
+                                ・<strong>0.0%以下 【⚔️ 激戦】</strong> ブレイク前夜期待<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁へのアタック目前。ここを抜ければ一気に青空が広がる激戦区と位置付けられます。</span><br>
+                                ・<strong>+10.0%以内 【🚀 安全圏】</strong> トレンド初動かも！？<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁の突破を完了！最も素直に上昇の波に乗りやすいベストタイミングになりやすい。</span><br>
+                                ・<strong>+20.0%以内 【⚠️ 警戒】</strong> 短期過熱気味警戒レベル<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁から少し離れすぎました。壁付近までの「押し目（下落）」を待つのが無難です。</span><br>
+                                ・<strong>+20.1%以上 【💀 高度な警戒】</strong> 高値掴みリスク大<br>
+                                　<span style='color: #dddddd; font-size: 0.85rem;'>壁から完全に乖離した超高値圏。今から飛び乗るのは極めて危険です。上級者でも難しいゾーンのため注意必須。</span>
+                                </div>
+                                """
+                                st.markdown(safe_explain_html, unsafe_allow_html=True)
 
-                    draw_chart(data)
+                        draw_chart(data)
                 else: st.error(f"❌ {code}: データ取得エラー")
